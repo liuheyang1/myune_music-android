@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:provider/provider.dart';
@@ -5,13 +7,25 @@ import '../../page/setting/settings_provider.dart';
 
 class AppWindowTitleBar extends StatelessWidget {
   final VoidCallback onSettingsPressed;
+  final bool showBackButton;
+  final bool showSettingsButton;
+  final VoidCallback? onNavigationPressed;
 
-  const AppWindowTitleBar({super.key, required this.onSettingsPressed});
+  const AppWindowTitleBar({
+    super.key,
+    required this.onSettingsPressed,
+    this.showBackButton = true,
+    this.showSettingsButton = true,
+    this.onNavigationPressed,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final isDesktop =
+        Platform.isWindows || Platform.isLinux || Platform.isMacOS;
+
     return Container(
-      height: 31.0,
+      height: isDesktop ? 31.0 : 48.0,
       decoration: const BoxDecoration(
         color: Colors.transparent, // 透明背景以显示模糊效果
       ),
@@ -21,25 +35,27 @@ class AppWindowTitleBar extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 10),
             child: Row(
               children: [
-                IconButton(
-                  visualDensity: VisualDensity.compact,
-                  icon: Icon(
-                    Icons.arrow_back,
-                    color: Theme.of(context).textTheme.bodyLarge?.color,
+                if (showBackButton)
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    icon: Icon(
+                      Icons.arrow_back,
+                      color: Theme.of(context).textTheme.bodyLarge?.color,
+                    ),
+                    onPressed: () {
+                      Navigator.of(context).pop();
+                    },
+                    tooltip: '返回',
+                    padding: EdgeInsets.zero,
                   ),
-                  onPressed: () {
-                    Navigator.of(context).pop();
-                  },
-                  tooltip: '返回',
-                  padding: EdgeInsets.zero,
-                ),
-                IconButton(
-                  visualDensity: VisualDensity.compact,
-                  icon: const Icon(Icons.more_horiz),
-                  onPressed: onSettingsPressed,
-                  tooltip: '歌词设置',
-                  padding: EdgeInsets.zero,
-                ),
+                if (showSettingsButton)
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.more_horiz),
+                    onPressed: onSettingsPressed,
+                    tooltip: '歌词设置',
+                    padding: EdgeInsets.zero,
+                  ),
                 ColorFiltered(
                   colorFilter: ColorFilter.mode(
                     Theme.of(context).brightness == Brightness.dark
@@ -61,51 +77,62 @@ class AppWindowTitleBar extends StatelessWidget {
               ],
             ),
           ),
-          Expanded(
-            child: DragToMoveArea(
-              // 这里的Container是为了保证这个区域可以拖动
-              child: Container(),
+          if (isDesktop)
+            Expanded(child: DragToMoveArea(child: Container()))
+          else
+            const Spacer(),
+          if (!isDesktop && onNavigationPressed != null)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: IconButton(
+                tooltip: '功能菜单',
+                visualDensity: VisualDensity.compact,
+                onPressed: onNavigationPressed,
+                icon: const Icon(Icons.apps_rounded),
+              ),
             ),
-          ),
-          Align(
-            alignment: Alignment.centerRight,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _WindowButton(
-                  icon: Icons.remove,
-                  onPressed: () {
-                    final settings = Provider.of<SettingsProvider>(
-                      context,
-                      listen: false,
-                    );
-                    if (settings.minimizeToTray) {
-                      windowManager.hide();
-                    } else {
-                      windowManager.minimize();
-                    }
-                  },
-                  hoverColor: const Color.fromRGBO(144, 202, 249, 1),
-                ),
-                const SizedBox(width: 2),
-                _WindowButton(
-                  icon: Icons.fullscreen_rounded,
-                  onPressed: () async {
-                    final bool isFullScreen = await windowManager
-                        .isFullScreen();
-                    await windowManager.setFullScreen(!isFullScreen);
-                  },
-                  hoverColor: const Color.fromRGBO(144, 202, 249, 1),
-                ),
-                const SizedBox(width: 2),
-                _WindowButton(
-                  icon: Icons.close,
-                  onPressed: () => windowManager.close(),
-                  hoverColor: const Color.fromRGBO(239, 154, 154, 1),
-                ),
-              ],
+          if (isDesktop)
+            Align(
+              alignment: Alignment.centerRight,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _WindowButton(
+                    icon: Icons.remove,
+                    onPressed: () {
+                      final settings = Provider.of<SettingsProvider>(
+                        context,
+                        listen: false,
+                      );
+                      if (settings.minimizeToTray) {
+                        windowManager.hide();
+                      } else {
+                        windowManager.minimize();
+                      }
+                    },
+                    hoverColor: const Color.fromRGBO(144, 202, 249, 1),
+                  ),
+                  const SizedBox(width: 2),
+                  _WindowButton(
+                    icon: Icons.crop_square,
+                    onPressed: () async {
+                      if (await windowManager.isMaximized()) {
+                        await windowManager.unmaximize();
+                      } else {
+                        await windowManager.maximize();
+                      }
+                    },
+                    hoverColor: const Color.fromRGBO(144, 202, 249, 1),
+                  ),
+                  const SizedBox(width: 2),
+                  _WindowButton(
+                    icon: Icons.close,
+                    onPressed: () => windowManager.close(),
+                    hoverColor: const Color.fromRGBO(239, 154, 154, 1),
+                  ),
+                ],
+              ),
             ),
-          ),
         ],
       ),
     );

@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:hotkey_manager/hotkey_manager.dart';
 import '../page/playlist/playlist_content_notifier.dart';
@@ -10,7 +12,14 @@ class GlobalHotkeyManager {
 
   bool _isInitialized = false;
 
-  Future<void> init(PlaylistContentNotifier notifier, SettingsProvider settings) async {
+  bool get _isDesktop =>
+      Platform.isWindows || Platform.isLinux || Platform.isMacOS;
+
+  Future<void> init(
+    PlaylistContentNotifier notifier,
+    SettingsProvider settings,
+  ) async {
+    if (!_isDesktop) return;
     if (_isInitialized) {
       await unregisterAll();
     }
@@ -21,6 +30,7 @@ class GlobalHotkeyManager {
   }
 
   Future<void> unregisterAll() async {
+    if (!_isDesktop) return;
     try {
       await hotKeyManager.unregisterAll();
     } catch (e) {
@@ -28,7 +38,11 @@ class GlobalHotkeyManager {
     }
   }
 
-  Future<void> registerAll(PlaylistContentNotifier notifier, SettingsProvider settings) async {
+  Future<void> registerAll(
+    PlaylistContentNotifier notifier,
+    SettingsProvider settings,
+  ) async {
+    if (!_isDesktop) return;
     if (!settings.enableGlobalHotkeys) return;
 
     if (settings.playPauseHotKey != null) {
@@ -78,11 +92,14 @@ class GlobalHotkeyManager {
     PlaylistContentNotifier notifier,
     SettingsProvider settings,
   ) async {
+    if (!_isDesktop) return;
     if (oldHotKey != null) {
       try {
         await hotKeyManager.unregister(oldHotKey);
       } catch (e) {
-        debugPrint('Failed to unregister hotkey: ${oldHotKey.toJson()}, error: $e');
+        debugPrint(
+          'Failed to unregister hotkey: ${oldHotKey.toJson()}, error: $e',
+        );
       }
     }
 
@@ -90,7 +107,8 @@ class GlobalHotkeyManager {
       VoidCallback? callback;
       switch (type) {
         case 'play_pause':
-          callback = () => notifier.isPlaying ? notifier.pause() : notifier.play();
+          callback = () =>
+              notifier.isPlaying ? notifier.pause() : notifier.play();
           break;
         case 'next_track':
           callback = () => notifier.playNext();
@@ -99,10 +117,12 @@ class GlobalHotkeyManager {
           callback = () => notifier.playPrevious();
           break;
         case 'volume_up':
-          callback = () => notifier.setVolume((notifier.volume + 3).clamp(0.0, 100.0));
+          callback = () =>
+              notifier.setVolume((notifier.volume + 3).clamp(0.0, 100.0));
           break;
         case 'volume_down':
-          callback = () => notifier.setVolume((notifier.volume - 3).clamp(0.0, 100.0));
+          callback = () =>
+              notifier.setVolume((notifier.volume - 3).clamp(0.0, 100.0));
           break;
       }
       if (callback != null) {

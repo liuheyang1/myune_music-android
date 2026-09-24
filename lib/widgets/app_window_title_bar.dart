@@ -3,7 +3,6 @@ import 'package:window_manager/window_manager.dart';
 import 'package:provider/provider.dart';
 
 import '../page/setting/settings_provider.dart';
-import 'custom_background_layer.dart';
 
 class AppWindowTitleBar extends StatelessWidget {
   const AppWindowTitleBar({super.key});
@@ -11,12 +10,7 @@ class AppWindowTitleBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ColorScheme colorScheme = Theme.of(context).colorScheme;
-    final settings = context.watch<SettingsProvider>();
-    final Color titleBarBackgroundColor =
-        CustomBackgroundSurfaces.transparentWhenEnabled(
-          settings,
-          colorScheme.surface,
-        );
+    final Color titleBarBackgroundColor = colorScheme.surface;
     return Container(
       height: 31.0,
       color: titleBarBackgroundColor,
@@ -69,6 +63,18 @@ class AppWindowTitleBar extends StatelessWidget {
                       windowManager.hide();
                     } else {
                       windowManager.minimize();
+                    }
+                  },
+                  hoverColor: const Color.fromRGBO(144, 202, 249, 1),
+                ),
+                const SizedBox(width: 2),
+                _WindowButton(
+                  icon: Icons.crop_square,
+                  onPressed: () async {
+                    if (await windowManager.isMaximized()) {
+                      await windowManager.unmaximize();
+                    } else {
+                      await windowManager.maximize();
                     }
                   },
                   hoverColor: const Color.fromRGBO(144, 202, 249, 1),

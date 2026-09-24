@@ -1,202 +1,38 @@
-# 🎵 Myune Music
+# Myune Music for Android
 
-[![Flutter](https://img.shields.io/badge/Flutter-3.41%2B-blue?logo=flutter)](https://flutter.dev/)
-[![Platforms](https://img.shields.io/badge/Platforms-Windows%20%7C%20Linux-brightgreen)](#)
-![Rust](https://img.shields.io/badge/lang-Rust-orange)
-[![License](https://img.shields.io/badge/License-Apache%202.0-lightgrey)](LICENSE)
+Myune Music 的 Android 版源码。它是一个独立的 Flutter 工程，项目根目录就是本目录；`android/` 只是其中的原生平台部分。应用入口为 `lib/main.dart`，音频元数据功能还依赖 `rust/` 和 `rust_builder/`。
 
-一个基于 **Flutter (Dart)** 实现的简洁本地音乐播放器，支持 **Windows / Linux** 双端。
+## 构建
 
-> 🍎 macOS 用户可使用社区移植版：[myune_music_macos](https://github.com/Lannamokia/myune_music_macos)
+准备 Flutter 3.47.2、Android SDK/NDK 28.2.13676358、JDK 17 和 Rust 工具链。在本目录运行：
 
-## ✨ 特性
-* 💻 支持 **Windows / Linux** 双平台
-* 🎶 歌曲管理：支持 **文件夹歌单** 与 **手动歌单**
-* 🧠 自动按 **歌手** 与 **专辑** 分类
-* 🎨 使用 [Material 3](https://m3.material.io/) 组件与配色
-* 🎧 自动读取音频元数据，支持多种格式
-* 📝 歌词支持：内嵌歌词、本地 `.lrc`、网络歌词源，支持本地逐字歌词
-* 🔊 提供 **音调控制** 与 **倍速播放**
-* ✨ 可自定义主题配色与字体
-* 🖥️ 集成 **SMTC（系统媒体传输控制）** 与 **MPRIS（Linux）**
-* 🧩 支持 **音频独占模式**（仅 Windows）
-* 🔌 支持 **手动选择音频输出设备**
-* ⚙️ **全局快捷键**支持
-* 🎵 读取使用和写入 **ReplayGain** 标签
-
-
-## 🔧关于 Linux
-
-对于0.9.1及以下的版本，需要安装 `libmpv`
-
-例如 **Ubuntu/Debian**
-
-``` bash
-sudo apt install libmpv-dev mpv 
-```
-
-对于0.9.2及以上版本，需要安装 `keybinder-3.0` 以使用全局快捷键
-
-例如 **Ubuntu/Debian**
-
-``` bash
-sudo apt install keybinder-3.0
-```
-
-## 🎶 桌面歌词
-由于 [Flutter](https://flutter.dev/) 暂不支持多窗口功能，因此暂未提供桌面歌词。
-可使用以下第三方工具替代：
-
-* [Lyricify Lite](https://apps.microsoft.com/detail/9nltpsv395k2)
-* [BetterLyrics](https://apps.microsoft.com/detail/9p1wcd1p597r)
-
-> 以上软件非本人开发，请支持原作者 🙏
-
-## 🌐 歌词
-
-目前仅支持UTF-8编码的 **.lrc** 文件
-
-默认情况下，将会优先读取内嵌歌词，如果没有则读取本地 `.lrc` 文件
-
-如果上述都无歌词的话，可以在设置中启用 **从网络获取歌词**
-
-启用后，将在未读取到**内联歌词**和本地 `.lrc` 文件自动获取歌词
-
-软件内默认提供了三个歌词源可供选择
-
-> 特别感谢 [lyricGeter](https://github.com/WisteriaZy/lyricGeter/) 的歌词获取以及处理逻辑
-
-### 🎵 歌词解析
-
-假设有如下格式的歌词
-
->[02:55.031]照らされた世界 咲き誇る大切な人
->
->[02:55.031]在这阳光普照的世界 骄傲绽放的重要之人
->
->[02:55.031]te ra sa re ta se ka i sa ki ho ko ru ta i se tsu na hi to
-
-可以看到这三句歌词对应的时间戳是相同的，那么软件内就会把它识别为同一句歌词的不同行
-
-上述格式从上到下对应原文/翻译/罗马音
-
-软件内提供设置`同时间戳歌词行数`，例如调整数值为2，最后一行（罗马音）就不会被显示
-
-### 📃 逐字歌词
-
-软件支持两种格式的逐字歌词：
-
->[00:15.237]悴[00:15.742]ん[00:15.908]だ[00:16.200]心
-
-或者:
-
->[00:15.237]<00:15.237>悴<00:15.742>ん<00:15.908>だ
-
-无需手动设置，软件会自动识别
-
-## 📦 内嵌元数据支持
-
-| 文件格式     | 元数据格式                     |
-|-------------|------------------------------|
-| AAC (ADTS)  | `ID3v2`, `ID3v1`             |
-| Ape         | `APE`, `ID3v2`, `ID3v1`      |
-| AIFF        | `ID3v2`, `Text Chunks`       |
-| FLAC        | `Vorbis Comments`, `ID3v2`   |
-| MP3         | `ID3v2`, `ID3v1`, `APE`      |
-| MP4         | `iTunes-style ilst`          |
-| MPC         | `APE`, `ID3v2`, `ID3v1`      |                        
-| Opus        | `Vorbis Comments`            |
-| Ogg Vorbis  | `Vorbis Comments`            |
-| Speex       | `Vorbis Comments`            |
-| WAV         | `ID3v2`, `RIFF INFO`         |
-| WavPack     | `APE`, `ID3v1`               |
-
-## 🎵 支持的音频格式
-
-参阅 [media-kit](https://github.com/media-kit/media-kit#supported-formats)
-
-> 部分格式需在设置启用 **允许添加任何格式的文件**
-
-
-## 📸 软件截图
-
-![](screenshot/1f1d095fdece3740c123cc267b2933d8.png)
-
-![](screenshot/ed403ac56eb0c48ccfa7f1bb769c040d.png)
-
-
-## 🚀 快速开始
-
-### 环境要求
-
-* 安装 **Rust** 环境
-* 安装 **Flutter SDK**，**Dart** 版本需 ≥ 3.10.0，**Flutter** 版本需 ≥ 3.41.0
-
-### 安装依赖
-
-```bash
+```powershell
 flutter pub get
+flutter analyze
+flutter test test
+flutter build apk --debug --target-platform android-arm64
 ```
 
-### 启动项目
+开发时可运行 `flutter run`。首次构建需要下载 Flutter/Dart、Gradle 和 Rust 依赖。GitHub Actions 对每次提交和拉取请求执行分析、备份测试和 Android/Rust 调试构建；调试 APK 不作为公开发行包。
 
-```bash
-flutter run
-```
+## 歌单备份
 
-### 构建项目
-```bash
-flutter build windows --release # 或对应平台名
-```
+设置 → 歌曲库提供“导出歌单备份”和“恢复歌单备份”。备份是带版本号的 JSON，只保存歌单结构、歌曲文件名和内容指纹，不包含音频，也不包含本机绝对路径。换机时先导入备份，再选择对应的音乐文件；应用按内容指纹匹配，显示已匹配与未找到的数量，确认后合并到现有歌单。未找到的歌曲不会写入歌单，可以稍后重新导入同一备份补齐。文件夹歌单在另一台设备上恢复为普通歌单，因为原文件夹路径无法移植。
 
-## 🧱 使用的依赖与致谢
+Android 上新选入的歌曲会从文件选择器缓存复制到应用的持久目录；旧缓存路径在文件仍存在时也会在启动后迁移。由于歌曲文件存放在应用目录，卸载应用会删除这些副本。请自行保留原始音乐文件及导出的歌单备份。
+这些音频副本已从 Android 自动备份中排除，避免大量音乐文件占用设备备份空间。
 
-| 插件                                                                      | 功能             |
-| ----------------------------------------------------------------------- | -------------- |
-| [lofty-rs](https://github.com/serial-ata/lofty-rs) | 读取音频元信息        |
-| [mpv_audio_kit](https://github.com/ales-drnz/mpv_audio_kit)                         | 音频播放支持         |
-| [anni_mpris_service](https://pub.dev/packages/anni_mpris_service)       | D-Bus MPRIS 控件 |
+## 发布前
 
-更多依赖请查看 [pubspec.yaml](pubspec.yaml)。
+- GitHub 预览版使用 `com.myune.music.preview`，可以与原应用并存。第一次公开发布后，保持此包名和同一把签名密钥，才能覆盖安装后续版本。
+- 由于 Android 对不同包名的数据隔离，预览版不会自动读取旧版 `com.myune.music` 的歌单；首次使用需重新导入音乐。此后可用预览版内的歌单备份功能迁移。
+- 推荐把 PKCS12 密钥和 `key.properties` 都放在源码目录外，将 `MYUNE_SIGNING_PROPERTIES` 指向该配置文件；本机发布脚本也会查找同级的 `myune_music-android-signing/key.properties`。配置模板见 `android/key.properties.example`。真实密码、密钥和构建产物不要提交到 GitHub。
+- 签名配置就绪后，在 Windows 运行 `& .\tool\build_release.ps1`；它会检查、构建签名 ARM64 APK，并打印 SHA-256。产物位于 `build/app/outputs/flutter-apk/app-arm64-v8a-release.apk`。发布到 GitHub Releases 时附上 APK、校验值、变更记录和已知限制。每次发行递增 `pubspec.yaml` 中 `+` 后面的构建号。
 
-特别感谢：
+## 来源与许可
 
-* [爱情终是残念](https://aqzscn.cn/archives/flutter-smtc)
-* [Ferry-200](https://github.com/Ferry-200/coriander_player)
+本项目从 [xiaobaimc/myune_music](https://github.com/xiaobaimc/myune_music) 的本地副本提取 Android 代码，并包含 Android 界面的后续修改。原项目及此提取版本保留 Apache License 2.0 许可，见 [LICENSE](LICENSE)。原项目的图标继续使用；新增听歌房插画的来源见 [ASSET_CREDITS.md](docs/ASSET_CREDITS.md)。`rust_builder/cargokit/` 包含第三方构建工具及其许可文件。发布时请保留原有版权与许可声明，并说明你对 Android 版所做的修改。
 
-> 提供了 Rust + Flutter 的 SMTC 实现参考 🙏
+公开版没有打包音乐、专辑封面、从其他网站获取的场景插画或 MiSans 字体文件。用户从自己的设备选择音乐时，应用会读取该文件内嵌的封面；这些文件不进入仓库或发布安装包。
 
-## ❤️ 贡献与赞助
-如果你喜欢这个项目，觉得它对你有帮助，可以通过以下方式支持我，让我有动力继续维护和更新
-
-### 🧩 贡献
-* 创建一个 [Issue](https://github.com/xiaobaimc/myune_music/issues)
-
-可以是bug反馈，新功能请求，或者是某个地方的优化
-
-* 创建一个 [Pull Request](https://github.com/xiaobaimc/myune_music/pulls)
-
-可以是bug修复，添加新功能，或者是某个地方的优化
-
-对于新功能的PR，请先创建一个 Issue 探讨该功能是否需要
-
-### ☕ 赞助
-
-* [爱发电](https://ifdian.net/a/xiaobaimc)
-
-## 📄 许可证
-
-本项目使用 **Apache License 2.0** 开源许可协议。
-详细内容请查看根目录下的 [LICENSE](/LICENSE) 文件。
-
-## 🔤 字体版权说明（Font License）
-
-本项目使用小米公司提供的 **MiSans 字体**，该字体已明确允许**免费商用**。
-
-* 字体版权归小米公司所有
-* 相关许可协议请查阅：[MiSans 字体知识产权使用许可协议](https://hyperos.mi.com/font-download/MiSans%E5%AD%97%E4%BD%93%E7%9F%A5%E8%AF%86%E4%BA%A7%E6%9D%83%E8%AE%B8%E5%8F%AF%E5%8D%8F%E8%AE%AE.pdf)
-* MiSans 官网：[https://hyperos.mi.com/font/](https://hyperos.mi.com/font/)
-
-## Star History Chart
-
-[![Star History Chart](https://api.star-history.com/svg?repos=xiaobaimc/myune_music&type=Date)](https://star-history.com/#xiaobaimc/myune_music&Date)
+GitHub 仓库 [liuheyang1/myune_music-android](https://github.com/liuheyang1/myune_music-android) 是原项目的 Fork；当前主分支仅保留 Android 工程。原项目的 Windows/Linux 代码请到上游仓库查看。

@@ -1,21 +1,23 @@
 // 音频可视化:https://pub.dev/packages/sonix
 
 import 'dart:async';
+import 'dart:io';
 import 'dart:ui' as ui;
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:mesh_gradient/mesh_gradient.dart';
 import 'package:colorgram/colorgram.dart';
 
-import '../widgets/lyrics_widget.dart';
 import 'playlist/playlist_content_notifier.dart';
 import '../widgets/song_detail_page/playbar.dart';
 import '../widgets/song_detail_page/app_window_title_bar.dart';
 import './setting/settings_provider.dart';
 import '../widgets/playing_queue_drawer.dart';
 import '../widgets/lyrics_settings_drawer.dart';
+import '../widgets/immersive_scene_background.dart';
 import 'playlist/playlist_models.dart';
 
 // 公共模糊背景组件
@@ -299,16 +301,110 @@ class _BackgroundBlurWidgetState extends State<BackgroundBlurWidget>
 }
 
 class SongDetailPage extends StatefulWidget {
-  const SongDetailPage({super.key});
+  final bool embedded;
+  final VoidCallback? onNavigationPressed;
+  final Object? heroTag;
+  final bool startInFocusMode;
+
+  const SongDetailPage({
+    super.key,
+    this.embedded = false,
+    this.onNavigationPressed,
+    this.heroTag,
+    this.startInFocusMode = false,
+  });
 
   @override
   State<SongDetailPage> createState() => _SongDetailPageState();
 }
 
-class _SongDetailPageState extends State<SongDetailPage> {
+class _SongDetailPageState extends State<SongDetailPage>
+    with WidgetsBindingObserver {
   bool _isHidden = false;
   Timer? _hideTimer;
+  Timer? _playbarHideTimer;
+  bool _isPlaybarHidden = false;
   bool _lastSettingValue = false;
+  bool? _lastImmersiveLandscape;
+  late bool _focusMode;
+
+  static const _playbarHideDelay = Duration(seconds: 2);
+
+  @override
+  void initState() {
+    super.initState();
+    _focusMode = widget.startInFocusMode;
+    WidgetsBinding.instance.addObserver(this);
+    _restartPlaybarHideTimer();
+    if (Platform.isAndroid || Platform.isIOS) {
+      unawaited(
+        SystemChrome.setPreferredOrientations(
+          _focusMode
+              ? [
+                  DeviceOrientation.landscapeLeft,
+                  DeviceOrientation.landscapeRight,
+                ]
+              : [DeviceOrientation.portraitUp],
+        ),
+      );
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) => _syncSystemUi());
+  }
+
+  @override
+  void didChangeMetrics() {
+    WidgetsBinding.instance.addPostFrameCallback((_) => _syncSystemUi());
+  }
+
+  Future<void> _syncSystemUi() async {
+    if (!mounted || !Platform.isAndroid) return;
+    final immersiveLandscape =
+        MediaQuery.orientationOf(context) == Orientation.landscape;
+    if (_lastImmersiveLandscape == immersiveLandscape) return;
+    _lastImmersiveLandscape = immersiveLandscape;
+
+    final brightness = Theme.of(context).brightness;
+    SystemChrome.setSystemUIOverlayStyle(
+      SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: brightness == Brightness.dark
+            ? Brightness.light
+            : Brightness.dark,
+        statusBarBrightness: brightness,
+        systemNavigationBarColor: Colors.transparent,
+        systemNavigationBarDividerColor: Colors.transparent,
+        systemNavigationBarIconBrightness: brightness == Brightness.dark
+            ? Brightness.light
+            : Brightness.dark,
+        systemStatusBarContrastEnforced: false,
+        systemNavigationBarContrastEnforced: false,
+      ),
+    );
+    await SystemChrome.setEnabledSystemUIMode(
+      immersiveLandscape
+          ? SystemUiMode.immersiveSticky
+          : SystemUiMode.edgeToEdge,
+    );
+  }
+
+  Future<void> _enterFocusMode() async {
+    if (!mounted || !(Platform.isAndroid || Platform.isIOS)) return;
+    setState(() {
+      _focusMode = true;
+      _isPlaybarHidden = false;
+    });
+    _restartPlaybarHideTimer();
+    await SystemChrome.setPreferredOrientations([
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
+  }
+
+  Future<void> _exitFocusMode() async {
+    if (!mounted || !(Platform.isAndroid || Platform.isIOS)) return;
+    setState(() => _focusMode = false);
+    await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+  }
 
   void _startTimer() {
     _cancelTimer();
@@ -326,6 +422,25 @@ class _SongDetailPageState extends State<SongDetailPage> {
     _hideTimer = null;
   }
 
+  void _restartPlaybarHideTimer() {
+    _playbarHideTimer?.cancel();
+    _playbarHideTimer = Timer(_playbarHideDelay, () {
+      if (mounted) setState(() => _isPlaybarHidden = true);
+    });
+  }
+
+  void _handlePlaybarInteraction() {
+    if (_isPlaybarHidden) {
+      setState(() => _isPlaybarHidden = false);
+    }
+    _restartPlaybarHideTimer();
+  }
+
+  void _handleInteraction(bool autoHideEnabled) {
+    _handleUserInteraction(autoHideEnabled);
+    _handlePlaybarInteraction();
+  }
+
   void _handleUserInteraction(bool autoHideEnabled) {
     if (!autoHideEnabled) return;
     _cancelTimer();
@@ -339,8 +454,171 @@ class _SongDetailPageState extends State<SongDetailPage> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _cancelTimer();
+    _playbarHideTimer?.cancel();
+    if (Platform.isAndroid) {
+      unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
+    }
+    if (Platform.isAndroid || Platform.isIOS) {
+      unawaited(
+        SystemChrome.setPreferredOrientations(DeviceOrientation.values),
+      );
+    }
     super.dispose();
+  }
+
+  Widget _buildPortraitPlayer(double scale) {
+    return Consumer<PlaylistContentNotifier>(
+      builder: (context, playlistNotifier, _) {
+        final currentSong = playlistNotifier.currentSong;
+        final currentLyrics = playlistNotifier.currentLyrics;
+        final colorScheme = Theme.of(context).colorScheme;
+
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            final artworkSize = math
+                .min(constraints.maxWidth - 48, constraints.maxHeight * 0.52)
+                .clamp(150.0, 360.0);
+            final artwork = Container(
+              width: artworkSize,
+              height: artworkSize,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(20 * scale),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.22),
+                    blurRadius: 28 * scale,
+                    offset: Offset(0, 12 * scale),
+                  ),
+                ],
+              ),
+              clipBehavior: Clip.antiAlias,
+              child:
+                  currentSong?.albumArt != null &&
+                      currentSong!.albumArt!.isNotEmpty
+                  ? Image.memory(
+                      currentSong.albumArt!,
+                      key: ValueKey(currentSong.filePath),
+                      fit: BoxFit.cover,
+                      gaplessPlayback: true,
+                      errorBuilder: (_, _, _) =>
+                          _ArtworkPlaceholder(colorScheme: colorScheme),
+                    )
+                  : _ArtworkPlaceholder(colorScheme: colorScheme),
+            );
+
+            return Padding(
+              padding: EdgeInsets.symmetric(horizontal: 24 * scale),
+              child: Column(
+                children: [
+                  const Spacer(),
+                  if (widget.heroTag != null)
+                    Hero(
+                      tag: widget.heroTag!,
+                      transitionOnUserGestures: true,
+                      createRectTween: (begin, end) =>
+                          MaterialRectCenterArcTween(begin: begin, end: end),
+                      child: Material(
+                        type: MaterialType.transparency,
+                        child: artwork,
+                      ),
+                    )
+                  else
+                    artwork,
+                  SizedBox(height: 24 * scale),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              currentSong?.title ?? '暂无播放歌曲',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 22 * scale,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            SizedBox(height: 4 * scale),
+                            Text(
+                              currentSong?.artist ?? '请先从音乐库选择歌曲',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 15 * scale,
+                                color: colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      SizedBox(width: 12 * scale),
+                      IconButton.filledTonal(
+                        onPressed: _enterFocusMode,
+                        tooltip: '专注模式',
+                        icon: const Icon(Icons.music_note_rounded),
+                      ),
+                    ],
+                  ),
+                  SizedBox(height: 18 * scale),
+                  SizedBox(
+                    height: 52 * scale,
+                    child: Center(
+                      child: currentLyrics.isEmpty
+                          ? Text(
+                              '暂无歌词',
+                              style: TextStyle(
+                                color: colorScheme.onSurfaceVariant,
+                                fontSize: 15 * scale,
+                              ),
+                            )
+                          : StreamBuilder<int>(
+                              stream: playlistNotifier.lyricLineIndexStream,
+                              initialData:
+                                  playlistNotifier.currentLyricLineIndex,
+                              builder: (context, snapshot) {
+                                final index =
+                                    snapshot.data ??
+                                    playlistNotifier.currentLyricLineIndex;
+                                var text = '♪';
+                                if (index >= 0 &&
+                                    index < currentLyrics.length &&
+                                    currentLyrics[index].texts.isNotEmpty) {
+                                  final candidate = currentLyrics[index]
+                                      .texts
+                                      .first
+                                      .trim();
+                                  if (candidate.isNotEmpty) text = candidate;
+                                }
+                                return AnimatedSwitcher(
+                                  duration: const Duration(milliseconds: 240),
+                                  child: Text(
+                                    text,
+                                    key: ValueKey('$index:$text'),
+                                    textAlign: TextAlign.center,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontSize: 16 * scale,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                    ),
+                  ),
+                  const Spacer(),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   @override
@@ -369,6 +647,9 @@ class _SongDetailPageState extends State<SongDetailPage> {
     final size = MediaQuery.of(context).size;
     final aspectRatio = size.aspectRatio;
     final isPortrait = aspectRatio <= 1.0; // 竖屏判断
+    final isMobilePortrait =
+        isPortrait && (Platform.isAndroid || Platform.isIOS);
+    final hideChrome = !isPortrait && _isHidden;
 
     // 计算窗口分辨率缩放系数
     final double width = size.width > 0 ? size.width : 1150.0;
@@ -376,450 +657,307 @@ class _SongDetailPageState extends State<SongDetailPage> {
     final double scale = (math.sqrt(
       (width * height) / (1150.0 * 620.0),
     )).clamp(0.5, 2.0);
+    final double portraitScale = (width / 430.0).clamp(0.88, 1.15);
 
-    return Listener(
-      onPointerDown: (_) => _handleUserInteraction(autoHideEnabled),
-      onPointerMove: (_) => _handleUserInteraction(autoHideEnabled),
-      onPointerHover: (_) => _handleUserInteraction(autoHideEnabled),
-      onPointerSignal: (_) => _handleUserInteraction(autoHideEnabled),
-      child: MouseRegion(
-        cursor: _isHidden ? SystemMouseCursors.none : MouseCursor.defer,
-        onHover: (_) => _handleUserInteraction(autoHideEnabled),
-        child: Scaffold(
-          endDrawer: const PlayingQueueDrawer(),
-          body: BackgroundBlurWidget(
-            child: Column(
-              children: [
-                // 标题栏
-                AnimatedOpacity(
-                  duration: const Duration(milliseconds: 300),
-                  opacity: _isHidden ? 0.0 : 1.0,
-                  child: IgnorePointer(
-                    ignoring: _isHidden,
-                    child: Builder(
-                      builder: (BuildContext context) {
-                        return AppWindowTitleBar(
-                          onSettingsPressed: () {
-                            Scaffold.of(context).openDrawer();
-                          },
-                        );
-                      },
-                    ),
-                  ),
-                ),
-                // 主内容区域
-                Expanded(
-                  child: isPortrait
-                      ? // 竖屏：显示歌词和底部播放控制
-                        Column(
-                          children: [
-                            // 歌词区域
-                            Expanded(
-                              child: Padding(
-                                padding: EdgeInsets.all(20 * scale),
-                                child: Center(
-                                  child: Builder(
-                                    builder: (context) {
-                                      final playlistNotifier = context
-                                          .watch<PlaylistContentNotifier>();
-                                      final currentLyrics =
-                                          playlistNotifier.currentLyrics;
-                                      if (currentLyrics.isEmpty) {
-                                        return const Center(
-                                          child: Text(
-                                            '无歌词数据',
-                                            style: TextStyle(
-                                              fontSize: 20,
-                                              color: Colors.grey,
-                                            ),
-                                          ),
-                                        );
-                                      }
-                                      return StreamBuilder<int>(
-                                        stream: playlistNotifier
-                                            .lyricLineIndexStream,
-                                        initialData: playlistNotifier
-                                            .currentLyricLineIndex,
-                                        builder: (context, snapshot) {
-                                          return LyricsView(
-                                            maxLinesPerLyric: context
-                                                .watch<SettingsProvider>()
-                                                .maxLinesPerLyric,
-                                            onTapLine: (index) {
-                                              final seekTime =
-                                                  currentLyrics[index]
-                                                      .timestamp;
-                                              playlistNotifier.mediaPlayer.seek(
-                                                seekTime,
-                                              );
-                                            },
-                                          );
-                                        },
-                                      );
-                                    },
-                                  ),
-                                ),
-                              ),
-                            ),
-                            // 底部播放控制栏
-                            AnimatedOpacity(
-                              duration: const Duration(milliseconds: 300),
-                              opacity: _isHidden ? 0.0 : 1.0,
-                              child: IgnorePointer(
-                                ignoring: _isHidden,
-                                child: const PortraitPlaybar(),
-                              ),
-                            ),
-                          ],
-                        )
-                      : // 横屏：保留原有布局
-                        Row(
-                          children: [
-                            SizedBox(width: 80 * scale),
-                            // 左侧歌曲信息和播放控制区域
-                            Expanded(
-                              flex: 2,
-                              child: Padding(
-                                padding: EdgeInsets.only(
-                                  top: 10 * scale,
-                                  bottom: 55 * scale,
-                                ),
-                                child: Center(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.center,
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      // 歌曲信息
-                                      Consumer<PlaylistContentNotifier>(
-                                        builder: (context, playlistNotifier, child) {
-                                          final currentSong =
-                                              playlistNotifier.currentSong;
-                                          return LayoutBuilder(
-                                            builder: (context, constraints) {
-                                              final w = constraints.maxWidth;
-                                              // 基于窗口分辨率缩放系数计算封面大小，同时不超过父容器宽度
-                                              final double baseImageSize =
-                                                  310.0 * scale;
-                                              final double imageSize = math.min(
-                                                w,
-                                                baseImageSize,
-                                              );
-
-                                              // 根据图片大小计算字体大小
-                                              final double titleFontSize =
-                                                  (imageSize * 0.05).clamp(
-                                                    20.0,
-                                                    32.0,
-                                                  );
-                                              final double artistFontSize =
-                                                  (imageSize * 0.03).clamp(
-                                                    14.0,
-                                                    28.0,
-                                                  );
-
-                                              final borderRadius =
-                                                  BorderRadius.circular(12);
-                                              const Widget fallback = Icon(
-                                                Icons.music_note,
-                                                size: 72,
-                                                color: Colors.black12,
-                                              );
-
-                                              return Column(
-                                                crossAxisAlignment:
-                                                    CrossAxisAlignment.center,
-                                                children: [
-                                                  SizedBox(
-                                                    width: imageSize,
-                                                    child: Column(
-                                                      crossAxisAlignment:
-                                                          CrossAxisAlignment
-                                                              .stretch,
-                                                      children: [
-                                                        SizedBox(
-                                                          height: 45 * scale,
-                                                        ),
-                                                        // 歌曲标题
-                                                        AnimatedAlign(
-                                                          duration:
-                                                              const Duration(
-                                                                milliseconds:
-                                                                    500,
-                                                              ),
-                                                          curve:
-                                                              Curves.easeInOut,
-                                                          alignment: _isHidden
-                                                              ? Alignment
-                                                                    .centerLeft
-                                                              : Alignment
-                                                                    .center,
-                                                          child: AnimatedPadding(
-                                                            duration:
-                                                                const Duration(
-                                                                  milliseconds:
-                                                                      500,
-                                                                ),
-                                                            curve: Curves
-                                                                .easeInOut,
-                                                            padding:
-                                                                EdgeInsets.only(
-                                                                  left:
-                                                                      _isHidden
-                                                                      ? 2.0 *
-                                                                            scale
-                                                                      : 0.0,
-                                                                ),
-                                                            child: Text(
-                                                              currentSong
-                                                                      ?.title ??
-                                                                  '未知歌曲',
-                                                              style: TextStyle(
-                                                                fontSize:
-                                                                    titleFontSize,
-                                                                fontWeight:
-                                                                    FontWeight
-                                                                        .w600,
-                                                              ),
-                                                              textAlign:
-                                                                  _isHidden
-                                                                  ? TextAlign
-                                                                        .left
-                                                                  : TextAlign
-                                                                        .center,
-                                                              overflow:
-                                                                  TextOverflow
-                                                                      .ellipsis,
-                                                              maxLines: 1,
-                                                              softWrap: false,
-                                                            ),
-                                                          ),
-                                                        ),
-                                                        // 艺术家
-                                                        AnimatedAlign(
-                                                          duration:
-                                                              const Duration(
-                                                                milliseconds:
-                                                                    500,
-                                                              ),
-                                                          curve:
-                                                              Curves.easeInOut,
-                                                          alignment: _isHidden
-                                                              ? Alignment
-                                                                    .centerLeft
-                                                              : Alignment
-                                                                    .center,
-                                                          child: AnimatedPadding(
-                                                            duration:
-                                                                const Duration(
-                                                                  milliseconds:
-                                                                      500,
-                                                                ),
-                                                            curve: Curves
-                                                                .easeInOut,
-                                                            padding:
-                                                                EdgeInsets.only(
-                                                                  left:
-                                                                      _isHidden
-                                                                      ? 2.0 *
-                                                                            scale
-                                                                      : 0.0,
-                                                                ),
-                                                            child: Text(
-                                                              currentSong !=
-                                                                      null
-                                                                  ? context
-                                                                            .watch<
-                                                                              SettingsProvider
-                                                                            >()
-                                                                            .showAlbumName
-                                                                        ? '${currentSong.artist} - ${currentSong.album}'
-                                                                        : currentSong
-                                                                              .artist
-                                                                  : '未知歌手',
-                                                              style: TextStyle(
-                                                                fontSize:
-                                                                    artistFontSize,
-                                                                color:
-                                                                    Theme.of(
-                                                                          context,
-                                                                        )
-                                                                        .colorScheme
-                                                                        .onSurface
-                                                                        .withValues(
-                                                                          alpha:
-                                                                              0.7,
-                                                                        ),
-                                                              ),
-                                                              textAlign:
-                                                                  _isHidden
-                                                                  ? TextAlign
-                                                                        .left
-                                                                  : TextAlign
-                                                                        .center,
-                                                              maxLines: 1,
-                                                              overflow:
-                                                                  TextOverflow
-                                                                      .clip,
-                                                              softWrap: false,
-                                                            ),
-                                                          ),
-                                                        ),
-                                                        SizedBox(
-                                                          height: 6 * scale,
-                                                        ),
-                                                        // 专辑封面
-                                                        SizedBox.square(
-                                                          dimension: imageSize,
-                                                          child: DecoratedBox(
-                                                            decoration: BoxDecoration(
-                                                              borderRadius:
-                                                                  borderRadius,
-                                                              boxShadow: [
-                                                                BoxShadow(
-                                                                  color: Colors
-                                                                      .black
-                                                                      .withValues(
-                                                                        alpha:
-                                                                            0.3,
-                                                                      ),
-                                                                  blurRadius:
-                                                                      12,
-                                                                  offset:
-                                                                      const Offset(
-                                                                        0,
-                                                                        2,
-                                                                      ),
-                                                                ),
-                                                              ],
-                                                            ),
-                                                            child: ClipRRect(
-                                                              borderRadius:
-                                                                  borderRadius,
-                                                              child: AspectRatio(
-                                                                aspectRatio: 1,
-                                                                child:
-                                                                    (currentSong?.albumArt !=
-                                                                            null &&
-                                                                        currentSong!
-                                                                            .albumArt!
-                                                                            .isNotEmpty)
-                                                                    ? Image.memory(
-                                                                        currentSong
-                                                                            .albumArt!,
-                                                                        fit: BoxFit
-                                                                            .cover,
-                                                                        errorBuilder:
-                                                                            (
-                                                                              _,
-                                                                              __,
-                                                                              ___,
-                                                                            ) =>
-                                                                                fallback,
-                                                                      )
-                                                                    : const ColoredBox(
-                                                                        color: Colors
-                                                                            .black12,
-                                                                        child: Center(
-                                                                          child:
-                                                                              fallback,
-                                                                        ),
-                                                                      ),
-                                                              ),
-                                                            ),
-                                                          ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  ),
-                                                  SizedBox(height: 8 * scale),
-                                                  // 播放控制区域
-                                                  AnimatedOpacity(
-                                                    duration: const Duration(
-                                                      milliseconds: 300,
-                                                    ),
-                                                    opacity: _isHidden
-                                                        ? 0.0
-                                                        : 1.0,
-                                                    child: IgnorePointer(
-                                                      ignoring: _isHidden,
-                                                      child: const Playbar(),
-                                                    ),
-                                                  ),
-                                                ],
-                                              );
-                                            },
-                                          );
-                                        },
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ),
-                            // 歌词区域
-                            Expanded(
-                              flex: 3,
-                              child: Padding(
-                                padding: EdgeInsets.only(
-                                  left: 80 * scale,
-                                  right: 80 * scale,
-                                  top: 20 * scale,
-                                  bottom: 40 * scale,
-                                ),
-                                child: Center(
-                                  child: Builder(
-                                    builder: (context) {
-                                      final playlistNotifier = context
-                                          .watch<PlaylistContentNotifier>();
-                                      final currentLyrics =
-                                          playlistNotifier.currentLyrics;
-                                      if (currentLyrics.isEmpty) {
-                                        return const Center(
-                                          child: Text(
-                                            '无歌词数据',
-                                            style: TextStyle(
-                                              fontSize: 20,
-                                              color: Colors.grey,
-                                            ),
-                                          ),
-                                        );
-                                      }
-                                      return StreamBuilder<int>(
-                                        stream: playlistNotifier
-                                            .lyricLineIndexStream,
-                                        initialData: playlistNotifier
-                                            .currentLyricLineIndex,
-                                        builder: (context, snapshot) {
-                                          return LyricsView(
-                                            maxLinesPerLyric: context
-                                                .watch<SettingsProvider>()
-                                                .maxLinesPerLyric,
-                                            onTapLine: (index) {
-                                              final seekTime =
-                                                  currentLyrics[index]
-                                                      .timestamp;
-                                              playlistNotifier.mediaPlayer.seek(
-                                                seekTime,
-                                              );
-                                            },
-                                          );
-                                        },
-                                      );
-                                    },
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
+    return PopScope(
+      canPop: !_focusMode,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop && _focusMode) unawaited(_exitFocusMode());
+      },
+      child: Listener(
+        onPointerDown: (_) => _handleInteraction(autoHideEnabled),
+        onPointerMove: (_) => _handleInteraction(autoHideEnabled),
+        onPointerHover: (_) => _handleInteraction(autoHideEnabled),
+        onPointerSignal: (_) => _handleInteraction(autoHideEnabled),
+        child: MouseRegion(
+          cursor: hideChrome ? SystemMouseCursors.none : MouseCursor.defer,
+          onHover: (_) => _handleInteraction(autoHideEnabled),
+          child: Scaffold(
+            endDrawer: const PlayingQueueDrawer(),
+            body: _PlaybackBackground(
+              useAlbumBlur: isMobilePortrait,
+              child: SafeArea(
+                top: isPortrait,
+                bottom: isPortrait,
+                left: isPortrait,
+                right: isPortrait,
+                child: Column(
+                  children: [
+                    // 标题栏
+                    if (!_focusMode || isPortrait)
+                      AnimatedOpacity(
+                        duration: const Duration(milliseconds: 300),
+                        opacity: hideChrome ? 0.0 : 1.0,
+                        child: IgnorePointer(
+                          ignoring: hideChrome,
+                          child: Builder(
+                            builder: (BuildContext context) {
+                              return AppWindowTitleBar(
+                                showBackButton: !widget.embedded,
+                                showSettingsButton:
+                                    !(Platform.isAndroid || Platform.isIOS),
+                                onNavigationPressed: widget.onNavigationPressed,
+                                onSettingsPressed: () {
+                                  Scaffold.of(context).openDrawer();
+                                },
+                              );
+                            },
+                          ),
                         ),
+                      ),
+                    // 主内容区域
+                    Expanded(
+                      child: isPortrait
+                          ? // 竖屏：标准手机播放器，封面、歌曲信息、歌词与控制
+                            Column(
+                              children: [
+                                Expanded(
+                                  child: _buildPortraitPlayer(portraitScale),
+                                ),
+                                const PortraitPlaybar(),
+                              ],
+                            )
+                          : // 横屏：沉浸式背景、中央歌词和底部播放栏
+                            Stack(
+                              fit: StackFit.expand,
+                              children: [
+                                Consumer<PlaylistContentNotifier>(
+                                  builder: (context, playlistNotifier, _) {
+                                    final currentLyrics =
+                                        playlistNotifier.currentLyrics;
+                                    final currentSong =
+                                        playlistNotifier.currentSong;
+
+                                    const infoColor = Color(0xFF23496B);
+                                    final Widget lyricsContent;
+                                    if (currentLyrics.isEmpty) {
+                                      lyricsContent = Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Text(
+                                            currentSong?.title ?? '未知歌曲',
+                                            textAlign: TextAlign.center,
+                                            style: TextStyle(
+                                              color: infoColor,
+                                              fontFamily: 'KaiTi',
+                                              fontSize: 30 * scale,
+                                              fontWeight: FontWeight.w500,
+                                              fontStyle: FontStyle.italic,
+                                              letterSpacing: 0.8 * scale,
+                                            ),
+                                          ),
+                                          SizedBox(height: 8 * scale),
+                                          Text(
+                                            currentSong?.artist ?? '未知歌手/乐队',
+                                            textAlign: TextAlign.center,
+                                            style: TextStyle(
+                                              color: infoColor.withValues(
+                                                alpha: 0.86,
+                                              ),
+                                              fontFamily: 'KaiTi',
+                                              fontSize: 18 * scale,
+                                              fontWeight: FontWeight.w400,
+                                              fontStyle: FontStyle.italic,
+                                              letterSpacing: 0.4 * scale,
+                                            ),
+                                          ),
+                                        ],
+                                      );
+                                    } else {
+                                      lyricsContent = StreamBuilder<int>(
+                                        stream: playlistNotifier
+                                            .lyricLineIndexStream,
+                                        initialData: playlistNotifier
+                                            .currentLyricLineIndex,
+                                        builder: (context, snapshot) {
+                                          final currentIndex =
+                                              snapshot.data ??
+                                              playlistNotifier
+                                                  .currentLyricLineIndex;
+                                          String? lyricText;
+                                          if (currentIndex >= 0 &&
+                                              currentIndex <
+                                                  currentLyrics.length) {
+                                            final currentLine =
+                                                currentLyrics[currentIndex];
+                                            if (!currentLine.isInterlude &&
+                                                currentLine.texts.isNotEmpty) {
+                                              final text = currentLine
+                                                  .texts
+                                                  .first
+                                                  .trim();
+                                              if (text.isNotEmpty) {
+                                                lyricText = text;
+                                              }
+                                            }
+                                          }
+
+                                          if (lyricText == null) {
+                                            return const SizedBox.shrink();
+                                          }
+
+                                          return AnimatedSwitcher(
+                                            duration: const Duration(
+                                              milliseconds: 260,
+                                            ),
+                                            transitionBuilder:
+                                                (child, animation) {
+                                                  return FadeTransition(
+                                                    opacity: animation,
+                                                    child: child,
+                                                  );
+                                                },
+                                            child: Text(
+                                              lyricText,
+                                              key: ValueKey(
+                                                '$currentIndex:$lyricText',
+                                              ),
+                                              textAlign: TextAlign.center,
+                                              softWrap: true,
+                                              maxLines: 2,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: TextStyle(
+                                                color: infoColor,
+                                                fontFamily: 'KaiTi',
+                                                fontSize: 27 * scale,
+                                                fontWeight: FontWeight.w500,
+                                                fontStyle: FontStyle.italic,
+                                                letterSpacing: 0.8 * scale,
+                                                height: 1.25,
+                                              ),
+                                            ),
+                                          );
+                                        },
+                                      );
+                                    }
+
+                                    return Positioned.fill(
+                                      child: Padding(
+                                        padding: EdgeInsets.fromLTRB(
+                                          80 * scale,
+                                          18 * scale,
+                                          80 * scale,
+                                          112 * scale,
+                                        ),
+                                        child: Center(
+                                          child: ConstrainedBox(
+                                            constraints: BoxConstraints(
+                                              maxWidth: math.min(
+                                                650 * scale,
+                                                size.width * 0.64,
+                                              ),
+                                            ),
+                                            child: Align(
+                                              alignment: const Alignment(
+                                                0,
+                                                -0.38,
+                                              ),
+                                              child: lyricsContent,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                ),
+                                Positioned(
+                                  left: 0,
+                                  right: 0,
+                                  bottom: 12 * scale,
+                                  child: Center(
+                                    child: ConstrainedBox(
+                                      constraints: const BoxConstraints(
+                                        maxWidth: 600,
+                                      ),
+                                      child: SizedBox(
+                                        width: double.infinity,
+                                        child: AnimatedSlide(
+                                          duration: const Duration(
+                                            milliseconds: 180,
+                                          ),
+                                          offset: _isPlaybarHidden
+                                              ? const Offset(0, 1.2)
+                                              : Offset.zero,
+                                          child: AnimatedOpacity(
+                                            duration: const Duration(
+                                              milliseconds: 180,
+                                            ),
+                                            opacity:
+                                                _isHidden || _isPlaybarHidden
+                                                ? 0.0
+                                                : 1.0,
+                                            child: IgnorePointer(
+                                              ignoring:
+                                                  _isHidden || _isPlaybarHidden,
+                                              child: DecoratedBox(
+                                                decoration: BoxDecoration(
+                                                  color: Colors.black
+                                                      .withValues(alpha: 0.34),
+                                                  borderRadius:
+                                                      BorderRadius.circular(
+                                                        18 * scale,
+                                                      ),
+                                                ),
+                                                child: Padding(
+                                                  padding: EdgeInsets.symmetric(
+                                                    horizontal: 14 * scale,
+                                                    vertical: 6 * scale,
+                                                  ),
+                                                  child: const Playbar(),
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
+            drawer: const LyricsSettingsDrawer(),
           ),
-          drawer: const LyricsSettingsDrawer(),
         ),
       ),
     );
+  }
+}
+
+class _ArtworkPlaceholder extends StatelessWidget {
+  final ColorScheme colorScheme;
+
+  const _ArtworkPlaceholder({required this.colorScheme});
+
+  @override
+  Widget build(BuildContext context) {
+    return ColoredBox(
+      color: colorScheme.surfaceContainerHighest,
+      child: Center(
+        child: Icon(
+          Icons.music_note_rounded,
+          size: 72,
+          color: colorScheme.onSurfaceVariant.withValues(alpha: 0.65),
+        ),
+      ),
+    );
+  }
+}
+
+class _PlaybackBackground extends StatelessWidget {
+  final bool useAlbumBlur;
+  final Widget child;
+
+  const _PlaybackBackground({required this.useAlbumBlur, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return useAlbumBlur
+        ? BackgroundBlurWidget(child: child)
+        : ImmersiveSceneBackground(child: child);
   }
 }

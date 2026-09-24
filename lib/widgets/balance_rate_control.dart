@@ -191,39 +191,49 @@ class BalanceRateControl extends StatelessWidget {
                                 const SizedBox(height: 18),
                                 SizedBox(
                                   height: 250,
-                                  child: Row(
-                                    mainAxisAlignment:
-                                        MainAxisAlignment.spaceBetween,
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.stretch,
-                                    children: List.generate(
-                                      PlaylistContentNotifier
-                                          .equalizerFrequencies
-                                          .length,
-                                      (index) {
-                                        final frequency =
-                                            PlaylistContentNotifier
-                                                .equalizerFrequencies[index];
-                                        final gain =
-                                            notifier.equalizerGains[index];
-                                        return _buildEqualizerBand(
-                                          label: _formatFrequency(frequency),
-                                          valueText: gain.toStringAsFixed(1),
-                                          value: gain,
-                                          onChanged: (value) {
-                                            notifier.setEqualizerBand(
-                                              index,
-                                              value,
-                                            );
-                                          },
-                                          onChangeEnd: (value) {
-                                            notifier.commitEqualizerBand(
-                                              index,
-                                              value,
-                                            );
-                                          },
-                                        );
-                                      },
+                                  child: SingleChildScrollView(
+                                    scrollDirection: Axis.horizontal,
+                                    child: Row(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.stretch,
+                                      children: List.generate(
+                                        PlaylistContentNotifier
+                                            .equalizerFrequencies
+                                            .length,
+                                        (index) {
+                                          final frequency =
+                                              PlaylistContentNotifier
+                                                  .equalizerFrequencies[index];
+                                          final gain =
+                                              notifier.equalizerGains[index];
+                                          return Padding(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 3,
+                                            ),
+                                            child: _buildEqualizerBand(
+                                              label: _formatFrequency(
+                                                frequency,
+                                              ),
+                                              valueText: gain.toStringAsFixed(
+                                                1,
+                                              ),
+                                              value: gain,
+                                              onChanged: (value) {
+                                                notifier.setEqualizerBand(
+                                                  index,
+                                                  value,
+                                                );
+                                              },
+                                              onChangeEnd: (value) {
+                                                notifier.commitEqualizerBand(
+                                                  index,
+                                                  value,
+                                                );
+                                              },
+                                            ),
+                                          );
+                                        },
+                                      ),
                                     ),
                                   ),
                                 ),

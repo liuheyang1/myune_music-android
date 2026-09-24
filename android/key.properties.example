@@ -1,0 +1,5 @@
+# Copy this file to key.properties and keep the real file out of Git.
+storeFile=C:/path/to/private/myune-preview.p12
+storePassword=replace-me
+keyAlias=preview
+keyPassword=replace-me

@@ -9,7 +9,9 @@ import 'balance_rate_control.dart';
 import 'play_pause_button.dart';
 import 'play_mode_button.dart';
 import '../page/setting/settings_provider.dart';
-import 'custom_background_layer.dart';
+
+const String mobileNowPlayingHeroTag = 'mobile-now-playing-page';
+const String mobileListeningRoomHeroTag = 'mobile-listening-room-now-playing';
 
 // 格式化时间函数
 String _formatDuration(Duration duration) {
@@ -22,10 +24,14 @@ String _formatDuration(Duration duration) {
 
 class Playbar extends StatefulWidget {
   final bool disableTap;
+  final VoidCallback? onOpenNowPlaying;
+  final Object? albumArtHeroTag;
 
   const Playbar({
     super.key,
     this.disableTap = false, // 默认不禁用点击
+    this.onOpenNowPlaying,
+    this.albumArtHeroTag,
   });
 
   @override
@@ -52,10 +58,256 @@ class _PlaybarState extends State<Playbar> {
     super.dispose();
   }
 
+  void _openNowPlaying(BuildContext context) {
+    if (widget.disableTap) return;
+    if (widget.onOpenNowPlaying != null) {
+      widget.onOpenNowPlaying!();
+      return;
+    }
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const SongDetailPage()));
+  }
+
+  Widget _buildCompactPlaybar({
+    required BuildContext context,
+    required PlaylistContentNotifier playlistNotifier,
+    required Player player,
+    required ColorScheme colorScheme,
+    required Color onBarColor,
+    required Color accentColor,
+  }) {
+    final currentSong = playlistNotifier.currentSong;
+    final showAlbumName = context.watch<SettingsProvider>().showAlbumName;
+    final albumCover = Material(
+      color: colorScheme.surfaceContainerHighest,
+      borderRadius: BorderRadius.circular(6),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: !widget.disableTap ? () => _openNowPlaying(context) : null,
+        child: SizedBox(
+          width: 42,
+          height: 42,
+          child:
+              currentSong?.albumArt != null && currentSong!.albumArt!.isNotEmpty
+              ? Image.memory(
+                  currentSong.albumArt!,
+                  fit: BoxFit.cover,
+                  gaplessPlayback: true,
+                  errorBuilder: (_, _, _) => Icon(
+                    Icons.music_note,
+                    color: onBarColor.withValues(alpha: 0.65),
+                  ),
+                )
+              : Icon(
+                  Icons.music_note,
+                  color: onBarColor.withValues(alpha: 0.65),
+                ),
+        ),
+      ),
+    );
+
+    return Container(
+      height: 72,
+      color: colorScheme.surface,
+      padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
+      child: Column(
+        children: [
+          SizedBox(
+            height: 20,
+            child: SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                trackHeight: 2,
+                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
+                overlayShape: SliderComponentShape.noOverlay,
+                activeTrackColor: accentColor,
+                inactiveTrackColor: onBarColor.withValues(alpha: 0.35),
+                thumbColor: accentColor,
+                showValueIndicator: ShowValueIndicator.onDrag,
+              ),
+              child: StreamBuilder<Duration?>(
+                stream: player.stream.position.throttleTime(
+                  const Duration(milliseconds: 200),
+                ),
+                initialData: player.state.position,
+                builder: (context, snapshot) {
+                  final currentPosition = snapshot.data ?? Duration.zero;
+                  final totalDuration = player.state.duration;
+                  final sliderValue = _isDraggingSlider
+                      ? _currentSliderValue
+                      : totalDuration.inMilliseconds == 0
+                      ? 0.0
+                      : currentPosition.inMilliseconds /
+                            totalDuration.inMilliseconds;
+
+                  return Slider(
+                    value: sliderValue.clamp(0.0, 1.0),
+                    min: 0,
+                    max: 1,
+                    label: _isDraggingSlider
+                        ? _formatDuration(
+                            Duration(
+                              milliseconds:
+                                  (totalDuration.inMilliseconds * sliderValue)
+                                      .round(),
+                            ),
+                          )
+                        : null,
+                    onChanged: (value) {
+                      setState(() {
+                        _isDraggingSlider = true;
+                        _currentSliderValue = value;
+                      });
+                    },
+                    onChangeStart: (_) {
+                      _dragSessionId++;
+                      _isDraggingSlider = true;
+                    },
+                    onChangeEnd: (value) async {
+                      final currentSessionId = _dragSessionId;
+                      final seekPosition = Duration(
+                        milliseconds: (totalDuration.inMilliseconds * value)
+                            .round(),
+                      );
+                      player.seek(seekPosition);
+                      await Future.delayed(const Duration(milliseconds: 200));
+                      if (mounted && _dragSessionId == currentSessionId) {
+                        setState(() {
+                          _isDraggingSlider = false;
+                          _currentSliderValue =
+                              totalDuration.inMilliseconds == 0
+                              ? 0
+                              : seekPosition.inMilliseconds /
+                                    totalDuration.inMilliseconds;
+                        });
+                      }
+                    },
+                  );
+                },
+              ),
+            ),
+          ),
+          Expanded(
+            child: Row(
+              children: [
+                if (widget.albumArtHeroTag != null)
+                  Hero(
+                    tag: widget.albumArtHeroTag!,
+                    transitionOnUserGestures: true,
+                    createRectTween: (begin, end) =>
+                        MaterialRectCenterArcTween(begin: begin, end: end),
+                    child: albumCover,
+                  )
+                else
+                  albumCover,
+                const SizedBox(width: 6),
+                Expanded(
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(6),
+                    onTap: currentSong != null && !widget.disableTap
+                        ? () => _openNowPlaying(context)
+                        : null,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            currentSong?.title ?? '未知歌曲',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: onBarColor.withValues(alpha: 0.9),
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          Text(
+                            currentSong == null
+                                ? '未知歌手'
+                                : showAlbumName
+                                ? '${currentSong.artist} - ${currentSong.album}'
+                                : currentSong.artist,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: onBarColor.withValues(alpha: 0.65),
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                IconButton(
+                  constraints: const BoxConstraints.tightFor(
+                    width: 38,
+                    height: 44,
+                  ),
+                  padding: EdgeInsets.zero,
+                  icon: Icon(Icons.skip_previous, color: onBarColor, size: 25),
+                  onPressed: playlistNotifier.playPrevious,
+                ),
+                StreamBuilder<bool>(
+                  stream: player.stream.playing,
+                  initialData: playlistNotifier.isPlaying,
+                  builder: (context, snapshot) {
+                    final isPlaying = snapshot.data ?? false;
+                    return IconButton(
+                      constraints: const BoxConstraints.tightFor(
+                        width: 42,
+                        height: 44,
+                      ),
+                      padding: EdgeInsets.zero,
+                      icon: Icon(
+                        isPlaying
+                            ? Icons.pause_circle_filled
+                            : Icons.play_circle_fill,
+                        color: accentColor,
+                        size: 34,
+                      ),
+                      onPressed: isPlaying
+                          ? playlistNotifier.pause
+                          : playlistNotifier.play,
+                    );
+                  },
+                ),
+                IconButton(
+                  constraints: const BoxConstraints.tightFor(
+                    width: 38,
+                    height: 44,
+                  ),
+                  padding: EdgeInsets.zero,
+                  icon: Icon(Icons.skip_next, color: onBarColor, size: 25),
+                  onPressed: playlistNotifier.playNext,
+                ),
+                IconButton(
+                  constraints: const BoxConstraints.tightFor(
+                    width: 38,
+                    height: 44,
+                  ),
+                  padding: EdgeInsets.zero,
+                  tooltip: '播放列表',
+                  icon: Icon(
+                    Icons.queue_music,
+                    color: onBarColor.withValues(alpha: 0.8),
+                    size: 23,
+                  ),
+                  onPressed: () => Scaffold.of(context).openEndDrawer(),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final ColorScheme colorScheme = Theme.of(context).colorScheme;
-    final settings = context.watch<SettingsProvider>();
 
     final Color onBarColor = colorScheme.onSurface;
     final Color accentColor = colorScheme.primary;
@@ -69,12 +321,20 @@ class _PlaybarState extends State<Playbar> {
       builder: (context, playlistNotifier, child) {
         final Player player = playlistNotifier.mediaPlayer;
 
+        if (isNarrowScreen) {
+          return _buildCompactPlaybar(
+            context: context,
+            playlistNotifier: playlistNotifier,
+            player: player,
+            colorScheme: colorScheme,
+            onBarColor: onBarColor,
+            accentColor: accentColor,
+          );
+        }
+
         return Container(
           height: 70,
-          color: CustomBackgroundSurfaces.transparentWhenEnabled(
-            settings,
-            colorScheme.surface,
-          ),
+          color: colorScheme.surface,
           padding: const EdgeInsets.symmetric(horizontal: 16.0),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,

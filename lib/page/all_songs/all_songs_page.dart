@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:silky_scroll/silky_scroll.dart';
@@ -7,8 +9,6 @@ import '../playlist/playlist_content_notifier.dart';
 import '../../widgets/sort_dialog.dart';
 import '../playlist/playlist_models.dart';
 import '../../services/notification_service.dart';
-import '../setting/settings_provider.dart';
-import '../../widgets/custom_background_layer.dart';
 
 class AllSongsPage extends StatefulWidget {
   const AllSongsPage({super.key});
@@ -46,6 +46,21 @@ class _AllSongsPageState extends State<AllSongsPage> {
     }
   }
 
+  Future<void> _importSongs(BuildContext context) async {
+    final notifier = context.read<PlaylistContentNotifier>();
+    notifier.stopSearch();
+
+    if (notifier.playlists.isEmpty) {
+      await notifier.addPlaylist('本地音乐');
+    } else if (notifier.selectedIndex < 0) {
+      notifier.setSelectedIndex(0);
+    }
+
+    if (context.mounted) {
+      await notifier.pickAndAddSongs();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final notifier = context.watch<PlaylistContentNotifier>();
@@ -58,7 +73,9 @@ class _AllSongsPageState extends State<AllSongsPage> {
 
     final isSearching = notifier.isSearching;
     final colorScheme = Theme.of(context).colorScheme;
-    final settings = context.watch<SettingsProvider>();
+    final isDesktop =
+        Platform.isWindows || Platform.isLinux || Platform.isMacOS;
+    final isPhone = !isDesktop && MediaQuery.sizeOf(context).shortestSide < 600;
     return Column(
       children: [
         Expanded(
@@ -85,40 +102,74 @@ class _AllSongsPageState extends State<AllSongsPage> {
                           onChanged: (keyword) => notifier.search(keyword),
                         )
                       // --- 常规状态下显示的UI ---
-                      : Row(
+                      : Column(
                           key: const ValueKey('title_bar_all'),
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
-                              '全部歌曲',
-                              style: Theme.of(context).textTheme.titleLarge,
+                            Row(
+                              children: [
+                                Text(
+                                  '全部歌曲',
+                                  style: Theme.of(context).textTheme.titleLarge,
+                                ),
+                                const SizedBox(width: 16),
+                                if (notifier.allSongs.isNotEmpty)
+                                  Text(
+                                    '共 ${notifier.allSongs.length} 首',
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.bodyMedium,
+                                  ),
+                                if (!isPhone) ...[
+                                  const Spacer(),
+                                  IconButton(
+                                    icon: const Icon(Icons.sort),
+                                    tooltip: '排序歌曲',
+                                    onPressed: () => _showSortDialog(context),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  IconButton(
+                                    icon: const Icon(Icons.search),
+                                    tooltip: '搜索歌曲',
+                                    onPressed: notifier.startSearch,
+                                  ),
+                                ],
+                              ],
                             ),
-                            const SizedBox(width: 16),
-                            // 显示歌曲总数
-                            if (notifier.allSongs.isNotEmpty)
-                              Text(
-                                '共 ${notifier.allSongs.length} 首',
-                                style: Theme.of(context).textTheme.bodyMedium,
+                            if (isPhone) ...[
+                              const SizedBox(height: 8),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: FilledButton.tonalIcon(
+                                      onPressed: notifier.isLoadingSongs
+                                          ? null
+                                          : () => _importSongs(context),
+                                      icon: const Icon(Icons.library_add),
+                                      label: const Text('导入歌曲'),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  IconButton.filledTonal(
+                                    icon: const Icon(Icons.sort),
+                                    tooltip: '排序歌曲',
+                                    onPressed: () => _showSortDialog(context),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  IconButton.filledTonal(
+                                    icon: const Icon(Icons.search),
+                                    tooltip: '搜索歌曲',
+                                    onPressed: notifier.startSearch,
+                                  ),
+                                ],
                               ),
-                            const Spacer(),
-                            IconButton(
-                              icon: const Icon(Icons.sort),
-                              tooltip: '排序歌曲',
-                              onPressed: () => _showSortDialog(context),
-                            ),
-                            const SizedBox(width: 8),
-                            // 搜索按钮
-                            IconButton(
-                              icon: const Icon(Icons.search),
-                              tooltip: '搜索歌曲',
-                              onPressed: notifier.startSearch, // 点击触发搜索
-                            ),
+                            ],
                           ],
                         ),
                 ),
                 const SizedBox(height: 6),
                 Expanded(
                   child: Material(
-                    color: CustomBackgroundSurfaces.materialColor(settings),
                     child: Selector<PlaylistContentNotifier, List<Song>>(
                       selector: (_, notifier) {
                         // 根据是否在搜索，决定使用哪个列表
@@ -173,6 +224,7 @@ class _AllSongsPageState extends State<AllSongsPage> {
                                         contextPlaylist:
                                             notifier.allSongsVirtualPlaylist,
                                         enableContextMenu: false,
+                                        reorderable: !isSearching,
                                         onTap: () {
                                           if (notifier.isSearching) {
                                             // 搜索模式下使用当前渲染列表快照，避免索引错位

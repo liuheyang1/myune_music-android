@@ -55,6 +55,8 @@ import 'package:mpv_audio_kit/mpv_audio_kit.dart';
 
 class AudioService {
   final Player _player;
+  Future<void> _playbackTransition = Future<void>.value();
+  int _playbackRequestId = 0;
 
   Player get player => _player;
 
@@ -89,19 +91,18 @@ class AudioService {
     required List<double> eqGains,
     required List<int> eqFrequencies,
     bool exclusiveMode = false,
-  }) async {
-    try {
-      await _player.setAudioExclusive(exclusiveMode);
-    } catch (e) {
-      //
-    }
-
-    await setPitch(pitch);
-    await setRate(rate);
-    await applyEqualizer(gains: eqGains, frequencies: eqFrequencies);
-
+  }) => _replacePlayback((requestId) async {
+    await _configurePlayback(
+      requestId,
+      pitch: pitch,
+      rate: rate,
+      eqGains: eqGains,
+      eqFrequencies: eqFrequencies,
+      exclusiveMode: exclusiveMode,
+    );
+    if (requestId != _playbackRequestId) return;
     await _player.open(Media(filePath), play: true);
-  }
+  });
 
   // 启用无缝播放模式：设置 Gapless.yes + 开启 prefetch
   Future<void> enableGapless() async {
@@ -132,22 +133,61 @@ class AudioService {
     required List<double> eqGains,
     required List<int> eqFrequencies,
     bool exclusiveMode = false,
-  }) async {
-    try {
-      await _player.setAudioExclusive(exclusiveMode);
-    } catch (e) {
-      //
-    }
-
-    await setPitch(pitch);
-    await setRate(rate);
-    await applyEqualizer(gains: eqGains, frequencies: eqFrequencies);
+  }) => _replacePlayback((requestId) async {
+    await _configurePlayback(
+      requestId,
+      pitch: pitch,
+      rate: rate,
+      eqGains: eqGains,
+      eqFrequencies: eqFrequencies,
+      exclusiveMode: exclusiveMode,
+    );
+    if (requestId != _playbackRequestId) return;
 
     final tracks = [Media(currentPath)];
     if (nextPath != null) {
       tracks.add(Media(nextPath));
     }
     await _player.openAll(tracks, play: true);
+  });
+
+  Future<void> _configurePlayback(
+    int requestId, {
+    required double pitch,
+    required double rate,
+    required List<double> eqGains,
+    required List<int> eqFrequencies,
+    required bool exclusiveMode,
+  }) async {
+    try {
+      await _player.setAudioExclusive(exclusiveMode);
+    } catch (e) {
+      //
+    }
+    if (requestId != _playbackRequestId) return;
+
+    await setPitch(pitch);
+    if (requestId != _playbackRequestId) return;
+    await setRate(rate);
+    if (requestId != _playbackRequestId) return;
+    await applyEqualizer(gains: eqGains, frequencies: eqFrequencies);
+  }
+
+  /// Serializes track replacement so an older asynchronous open cannot finish
+  /// after a newer album/song selection. Only the newest queued request runs.
+  Future<void> _replacePlayback(
+    Future<void> Function(int requestId) openReplacement,
+  ) {
+    final requestId = ++_playbackRequestId;
+    final previous = _playbackTransition.catchError((Object _) {});
+    final transition = previous.then((_) async {
+      if (requestId != _playbackRequestId) return;
+      await _player.stop();
+      if (requestId != _playbackRequestId) return;
+      await openReplacement(requestId);
+    });
+    _playbackTransition = transition.catchError((Object _) {});
+    return transition;
   }
 
   // 替换 mpv playlist 中的预备项（index 1）
@@ -176,8 +216,14 @@ class AudioService {
     }
   }
 
-  Future<void> stop() async {
-    await _player.stop();
+  Future<void> stop() {
+    final requestId = ++_playbackRequestId;
+    final previous = _playbackTransition.catchError((Object _) {});
+    final transition = previous.then((_) async {
+      if (requestId == _playbackRequestId) await _player.stop();
+    });
+    _playbackTransition = transition.catchError((Object _) {});
+    return transition;
   }
 
   Future<void> pause() async {

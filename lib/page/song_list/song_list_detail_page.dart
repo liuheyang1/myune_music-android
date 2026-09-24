@@ -10,8 +10,6 @@ import '../../widgets/app_window_title_bar.dart';
 import '../../widgets/playbar.dart';
 import '../../widgets/playing_queue_drawer.dart';
 import '../../services/notification_service.dart';
-import '../setting/settings_provider.dart';
-import '../../widgets/custom_background_layer.dart';
 
 class SongListDetailPage extends StatelessWidget {
   const SongListDetailPage({super.key});
@@ -39,14 +37,9 @@ class SongListDetailPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final notifier = context.watch<PlaylistContentNotifier>();
-    final settings = context.watch<SettingsProvider>();
     final title = notifier.activeDetailTitle;
 
     return Scaffold(
-      backgroundColor: CustomBackgroundSurfaces.transparentWhenEnabled(
-        settings,
-        Theme.of(context).colorScheme.surface,
-      ),
       endDrawer: const PlayingQueueDrawer(),
       body: Column(
         children: [
@@ -174,6 +167,7 @@ class SongListDetailWidget extends StatelessWidget {
                                 song: song,
                                 index: index,
                                 enableContextMenu: false, // 禁用右键菜单
+                                reorderable: !isSearching,
                                 contextPlaylist:
                                     notifier.playingPlaylist ??
                                     Playlist(id: 'dummy', name: 'dummy'),

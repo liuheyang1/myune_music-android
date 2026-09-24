@@ -5,8 +5,13 @@ import 'playlist_models.dart';
 
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:uuid/uuid.dart';
 
 class PlaylistManager {
+  final Directory? _rootOverride;
+
+  PlaylistManager({Directory? rootDirectory}) : _rootOverride = rootDirectory;
+
   static const String _playlistMetadataFileName = 'playlists_metadata.json';
   static const String _songsSubdirectory = 'playlist_songs';
   static const String _allSongsOrderFileName = 'all_songs_order.json';
@@ -16,6 +21,10 @@ class PlaylistManager {
   static const String _migrationFlagKey = 'data_migrated_to_app_support';
 
   Future<String> _getLocalPath() async {
+    if (_rootOverride != null) {
+      await _rootOverride.create(recursive: true);
+      return _rootOverride.path;
+    }
     // 文档目录
     final appDocDir = await getApplicationDocumentsDirectory();
     final appDir = Directory(
@@ -194,11 +203,20 @@ class PlaylistManager {
       }
       return loadedPlaylists;
     } catch (e) {
-      // 如果主加载过程出现任何错误，则回退到默认歌单并重新保存以确保数据一致性
+      // Preserve the unreadable file for recovery instead of overwriting it.
+      final metadataFile = await _getMetadataFile();
+      if (await metadataFile.exists()) {
+        final recoveredName =
+            '${metadataFile.path}.corrupt.${DateTime.now().millisecondsSinceEpoch}';
+        try {
+          await metadataFile.copy(recoveredName);
+        } catch (_) {
+          // A read-only or full filesystem should not prevent the app opening.
+        }
+      }
       final List<Playlist> defaultPlaylists = [
         Playlist(name: '默认歌单', isDefault: true),
       ];
-      await savePlaylists(defaultPlaylists);
       return defaultPlaylists;
     }
   }
@@ -210,17 +228,14 @@ class PlaylistManager {
       final List<Map<String, dynamic>> metadataJsonList = playlists
           .map((playlist) => playlist.toJson()) // 调用 toJson 只包含 ID
           .toList();
-      await metadataFile.writeAsString(jsonEncode(metadataJsonList));
-
-      // 保存每个歌单的歌曲路径文件
+      // Publish the metadata after the individual song lists are written.
       final existingSongFileIds = <String>{}; // 用于追踪当前存在的歌单ID
       for (final playlist in playlists) {
         final songFile = await _getSongFile(playlist.id);
-        await songFile.writeAsString(
-          jsonEncode(playlist.songFilePaths),
-        ); // 将歌曲路径列表保存到文件
+        await _writeAtomically(songFile, jsonEncode(playlist.songFilePaths));
         existingSongFileIds.add(playlist.id);
       }
+      await _writeAtomically(metadataFile, jsonEncode(metadataJsonList));
 
       // 清理已删除歌单的歌曲路径文件
       final path = await _getLocalPath();
@@ -239,8 +254,18 @@ class PlaylistManager {
         }
       }
       // print('歌单已保存');
-    } catch (e) {
-      // print('保存歌单失败: $e');
+    } catch (_) {
+      rethrow;
+    }
+  }
+
+  Future<void> _writeAtomically(File destination, String contents) async {
+    final temporary = File('${destination.path}.${const Uuid().v4()}.tmp');
+    try {
+      await temporary.writeAsString(contents, flush: true);
+      await temporary.rename(destination.path);
+    } finally {
+      if (await temporary.exists()) await temporary.delete();
     }
   }
 

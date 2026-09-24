@@ -12,7 +12,6 @@ import '../../widgets/sort_dialog.dart';
 import '../setting/settings_provider.dart';
 import '../../layout/navigation_notifier.dart';
 import '../../services/notification_service.dart';
-import '../../widgets/custom_background_layer.dart';
 
 enum ManagementMode { manual, folder }
 
@@ -22,16 +21,12 @@ class PlaylistContentWidget extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final settings = context.watch<SettingsProvider>();
     // 获取窗口宽高比
     final aspectRatio = MediaQuery.of(context).size.aspectRatio;
     final isPortrait = aspectRatio <= 1.0; // 竖屏判断
 
     return Container(
-      color: CustomBackgroundSurfaces.transparentWhenEnabled(
-        settings,
-        colorScheme.surface,
-      ),
+      color: colorScheme.surface,
       child: Row(
         children: [
           // 竖屏时隐藏歌单列表
@@ -518,30 +513,33 @@ class _AddPlaylistDialogState extends State<_AddPlaylistDialog> {
               ),
             ),
             const SizedBox(height: 16),
-            const Text('选择管理模式：'),
-            RadioGroup<ManagementMode>(
-              groupValue: _selectedMode,
-              onChanged: (value) {
-                if (_isCreating || value == null) return;
-                setState(() {
-                  _selectedMode = value;
-                });
-              },
-              child: const Column(
-                children: [
-                  RadioListTile<ManagementMode>(
-                    contentPadding: EdgeInsets.zero,
-                    title: Text('手动管理歌单歌曲'),
-                    value: ManagementMode.manual,
-                  ),
-                  RadioListTile<ManagementMode>(
-                    contentPadding: EdgeInsets.zero,
-                    title: Text('使用文件夹管理歌单'),
-                    value: ManagementMode.folder,
-                  ),
-                ],
+            if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) ...[
+              const Text('选择管理模式：'),
+              RadioGroup<ManagementMode>(
+                groupValue: _selectedMode,
+                onChanged: (value) {
+                  if (_isCreating || value == null) return;
+                  setState(() {
+                    _selectedMode = value;
+                  });
+                },
+                child: const Column(
+                  children: [
+                    RadioListTile<ManagementMode>(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text('手动管理歌单歌曲'),
+                      value: ManagementMode.manual,
+                    ),
+                    RadioListTile<ManagementMode>(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text('使用文件夹管理歌单'),
+                      value: ManagementMode.folder,
+                    ),
+                  ],
+                ),
               ),
-            ),
+            ] else
+              const Text('手机端歌单使用手动管理，可通过系统文件选择器添加歌曲。'),
             if (_selectedMode == ManagementMode.folder) ...[
               const SizedBox(height: 8),
               _FolderManagementWidget(
@@ -764,7 +762,9 @@ class _HeadSongListWidgetState extends State<HeadSongListWidget> {
         return AlertDialog(
           title: const Text('管理歌单'),
           content: Container(
-            width: 320,
+            width: MediaQuery.sizeOf(context).width < 600
+                ? double.maxFinite
+                : 320,
             height: 450,
             decoration: BoxDecoration(
               border: Border.all(color: colorScheme.outlineVariant),
@@ -789,6 +789,7 @@ class _HeadSongListWidgetState extends State<HeadSongListWidget> {
     final isSearching = notifier.isSearching;
     final aspectRatio = MediaQuery.of(context).size.aspectRatio;
     final isPortrait = aspectRatio <= 1.0;
+    final isCompact = MediaQuery.sizeOf(context).width < 600;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16.0, 8.0, 16.0, 0.0),
@@ -840,7 +841,74 @@ class _HeadSongListWidgetState extends State<HeadSongListWidget> {
                       ) = data;
                       return Row(
                         children: [
-                          if (isMultiSelectMode) ...[
+                          if (isMultiSelectMode && isCompact) ...[
+                            Expanded(
+                              child: Text(
+                                '已选择 ${notifier.selectedSongs.length} 首',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.titleMedium,
+                              ),
+                            ),
+                            PopupMenuButton<String>(
+                              tooltip: '批量操作',
+                              onSelected: (value) async {
+                                switch (value) {
+                                  case 'selectAll':
+                                    if (notifier.selectedSongs.length ==
+                                        notifier.currentPlaylistSongs.length) {
+                                      notifier.deselectAllSongs();
+                                    } else {
+                                      notifier.selectAllSongs();
+                                    }
+                                    break;
+                                  case 'addToPlaylist':
+                                    _showAddToPlaylistDialog(context);
+                                    break;
+                                  case 'addToQueue':
+                                    await notifier.addSongsToPlayingQueue(
+                                      notifier.selectedSongs,
+                                    );
+                                    notifier.exitMultiSelectMode();
+                                    break;
+                                  case 'remove':
+                                    _showDeleteConfirmationDialog(context);
+                                    break;
+                                }
+                              },
+                              itemBuilder: (context) => [
+                                PopupMenuItem(
+                                  value: 'selectAll',
+                                  child: Text(
+                                    notifier.selectedSongs.length ==
+                                            notifier.currentPlaylistSongs.length
+                                        ? '取消全选'
+                                        : '全选',
+                                  ),
+                                ),
+                                const PopupMenuItem(
+                                  value: 'addToPlaylist',
+                                  child: Text('添加到歌单'),
+                                ),
+                                const PopupMenuItem(
+                                  value: 'addToQueue',
+                                  child: Text('添加到播放队列'),
+                                ),
+                                if (!notifier
+                                    .playlists[notifier.selectedIndex]
+                                    .isFolderBased)
+                                  const PopupMenuItem(
+                                    value: 'remove',
+                                    child: Text('从列表中移除'),
+                                  ),
+                              ],
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.close),
+                              tooltip: '取消多选',
+                              onPressed: notifier.exitMultiSelectMode,
+                            ),
+                          ] else if (isMultiSelectMode) ...[
                             Text(
                               '已选择 ${notifier.selectedSongs.length} 首歌曲',
                               style: Theme.of(context).textTheme.titleLarge,
@@ -922,6 +990,11 @@ class _HeadSongListWidgetState extends State<HeadSongListWidget> {
                                   onExit: (_) =>
                                       setState(() => _isTitleHovered = false),
                                   child: Container(
+                                    constraints: BoxConstraints(
+                                      maxWidth: isCompact
+                                          ? 132
+                                          : double.infinity,
+                                    ),
                                     decoration: BoxDecoration(
                                       color: _isTitleHovered
                                           ? Theme.of(context)
@@ -940,6 +1013,8 @@ class _HeadSongListWidgetState extends State<HeadSongListWidget> {
                                       children: [
                                         Text(
                                           playlistName,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
                                           style: Theme.of(
                                             context,
                                           ).textTheme.titleLarge,
@@ -1043,14 +1118,80 @@ class _HeadSongListWidgetState extends State<HeadSongListWidget> {
                               ),
                             const SizedBox(width: 16),
                             // 显示当前歌单歌曲总数
-                            if (isPlaylistSelected &&
+                            if (!isCompact &&
+                                isPlaylistSelected &&
                                 notifier.currentPlaylistSongs.isNotEmpty)
                               Text(
                                 '共 ${notifier.currentPlaylistSongs.length} 首',
                                 style: Theme.of(context).textTheme.bodyMedium,
                               ),
                             const Spacer(),
-                            if (isPlaylistSelected &&
+                            if (isCompact && isPlaylistSelected) ...[
+                              if (!notifier
+                                  .playlists[notifier.selectedIndex]
+                                  .isFolderBased)
+                                IconButton(
+                                  icon: const Icon(Icons.add_circle_outline),
+                                  tooltip: '添加歌曲',
+                                  onPressed: notifier.pickAndAddSongs,
+                                ),
+                              IconButton(
+                                icon: const Icon(Icons.search),
+                                tooltip: '搜索歌曲',
+                                onPressed: () {
+                                  if (notifier.currentDetailViewContext !=
+                                      DetailViewContext.playlist) {
+                                    notifier.setViewContextForPlaylist();
+                                  }
+                                  notifier.startSearch();
+                                },
+                              ),
+                              PopupMenuButton<String>(
+                                tooltip: '更多操作',
+                                onSelected: (value) {
+                                  switch (value) {
+                                    case 'sort':
+                                      _showSortDialog(context);
+                                      break;
+                                    case 'multiSelect':
+                                      notifier.enterMultiSelectMode();
+                                      break;
+                                    case 'refresh':
+                                      notifier.refreshFolderPlaylist();
+                                      break;
+                                    case 'manage':
+                                      _showManagePlaylistsDialog(
+                                        context,
+                                        notifier,
+                                      );
+                                      break;
+                                  }
+                                },
+                                itemBuilder: (context) => [
+                                  const PopupMenuItem(
+                                    value: 'sort',
+                                    child: Text('排序歌曲'),
+                                  ),
+                                  const PopupMenuItem(
+                                    value: 'multiSelect',
+                                    child: Text('多选歌曲'),
+                                  ),
+                                  if (notifier
+                                      .playlists[notifier.selectedIndex]
+                                      .isFolderBased)
+                                    const PopupMenuItem(
+                                      value: 'refresh',
+                                      child: Text('刷新文件夹内容'),
+                                    ),
+                                  const PopupMenuItem(
+                                    value: 'manage',
+                                    child: Text('管理歌单'),
+                                  ),
+                                ],
+                              ),
+                            ],
+                            if (!isCompact &&
+                                isPlaylistSelected &&
                                 !notifier
                                     .playlists[notifier.selectedIndex]
                                     .isFolderBased)
@@ -1061,21 +1202,21 @@ class _HeadSongListWidgetState extends State<HeadSongListWidget> {
                                 icon: const Icon(Icons.add_circle_outline),
                                 label: const Text('添加歌曲'),
                               ),
-                            if (isPlaylistSelected)
+                            if (!isCompact && isPlaylistSelected)
                               IconButton(
                                 icon: const Icon(Icons.sort),
                                 tooltip: '排序歌曲',
                                 onPressed: () => _showSortDialog(context),
                               ),
                             // 多选按钮
-                            if (isPlaylistSelected)
+                            if (!isCompact && isPlaylistSelected)
                               IconButton(
                                 icon: const Icon(Icons.check_circle_outline),
                                 tooltip: '多选歌曲',
                                 onPressed: notifier.enterMultiSelectMode,
                               ),
                             // 新增：搜索按钮
-                            if (isPlaylistSelected)
+                            if (!isCompact && isPlaylistSelected)
                               IconButton(
                                 icon: const Icon(Icons.search),
                                 tooltip: '搜索歌曲',
@@ -1088,7 +1229,8 @@ class _HeadSongListWidgetState extends State<HeadSongListWidget> {
                                 },
                               ),
                             // 为基于文件夹的播放列表添加刷新按钮
-                            if (isPlaylistSelected &&
+                            if (!isCompact &&
+                                isPlaylistSelected &&
                                 notifier
                                     .playlists[notifier.selectedIndex]
                                     .isFolderBased)
@@ -1202,6 +1344,8 @@ class _HeadSongListWidgetState extends State<HeadSongListWidget> {
                                     },
                                     enableContextMenu:
                                         !isMultiSelectMode, // 多选模式下禁用右键菜单
+                                    reorderable:
+                                        !isSearching && !isMultiSelectMode,
                                   );
                                 },
                                 // 在搜索时禁用拖拽排序功能
@@ -1363,7 +1507,9 @@ class _HeadSongListWidgetState extends State<HeadSongListWidget> {
             return AlertDialog(
               title: Text(title),
               content: SizedBox(
-                width: 400,
+                width: MediaQuery.sizeOf(context).width < 600
+                    ? double.maxFinite
+                    : 400,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1574,6 +1720,7 @@ class SongTileWidget extends StatefulWidget {
   final Playlist contextPlaylist;
   // 控制右键菜单是否显示
   final bool enableContextMenu;
+  final bool reorderable;
 
   const SongTileWidget({
     super.key,
@@ -1582,6 +1729,7 @@ class SongTileWidget extends StatefulWidget {
     this.onTap,
     required this.contextPlaylist,
     this.enableContextMenu = true,
+    this.reorderable = false,
   });
 
   @override
@@ -1704,11 +1852,12 @@ class _SongTileWidgetState extends State<SongTileWidget> {
                   ),
                   onPressed: () => Navigator.pop(context, 'nextSong'),
                 ),
-                IconButton(
-                  tooltip: '显示文件',
-                  icon: Icon(Icons.folder_outlined, color: iconColor),
-                  onPressed: () => Navigator.pop(context, 'showInExplorer'),
-                ),
+                if (Platform.isWindows || Platform.isLinux || Platform.isMacOS)
+                  IconButton(
+                    tooltip: '显示文件',
+                    icon: Icon(Icons.folder_outlined, color: iconColor),
+                    onPressed: () => Navigator.pop(context, 'showInExplorer'),
+                  ),
                 // 添加到歌单按钮
                 IconButton(
                   tooltip: '添加到歌单',
@@ -2037,6 +2186,10 @@ class _SongTileWidgetState extends State<SongTileWidget> {
     final colorScheme = Theme.of(context).colorScheme;
     final notifier = context.read<PlaylistContentNotifier>();
     final settings = context.watch<SettingsProvider>();
+    final isDesktop =
+        Platform.isWindows || Platform.isLinux || Platform.isMacOS;
+    final isCompactMobile =
+        !isDesktop && MediaQuery.sizeOf(context).shortestSide < 600;
 
     // 监听多选模式和选中歌曲的变化
     final isMultiSelectMode = context.select<PlaylistContentNotifier, bool>(
@@ -2063,104 +2216,133 @@ class _SongTileWidgetState extends State<SongTileWidget> {
       return isThisSong && isThisContext;
     });
 
+    final tile = InkWell(
+      onTap: widget.onTap,
+      onLongPress: widget.enableContextMenu
+          ? () {
+              notifier.enterMultiSelectMode();
+              notifier.toggleSongSelection(widget.song);
+            }
+          : null,
+      onSecondaryTapDown: (details) {
+        // 根据 enableContextMenu 参数决定是否显示右键菜单
+        if (widget.enableContextMenu) {
+          _showSongContextMenu(details.globalPosition, notifier);
+        }
+      },
+      borderRadius: BorderRadius.circular(8),
+
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        decoration: BoxDecoration(
+          color: _isHovered
+              ? colorScheme.onSurface.withValues(alpha: 0.1)
+              : isPlaying
+              ? colorScheme.primary.withValues(alpha: 0.1)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: ListTile(
+          leading: SizedBox(
+            width: 50,
+            height: 50,
+            // isNotEmpty: 过滤空字节数组；errorBuilder: 兜底解码失败
+            child:
+                widget.song.albumArt != null && widget.song.albumArt!.isNotEmpty
+                ? ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: Image.memory(
+                      cacheWidth: 100,
+                      widget.song.albumArt!,
+                      fit: BoxFit.cover,
+                      gaplessPlayback: true,
+                      errorBuilder: (context, error, stackTrace) {
+                        return const Icon(
+                          Icons.music_note,
+                          size: 40,
+                          color: Colors.grey,
+                        );
+                      },
+                    ),
+                  )
+                : const Icon(Icons.music_note, size: 40, color: Colors.grey),
+          ),
+          title: Text(
+            widget.song.title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          subtitle: Text(
+            settings.showAlbumName
+                ? '${widget.song.artist} - ${widget.song.album}'
+                : widget.song.artist,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (isMultiSelectMode) ...[
+                Theme(
+                  data: Theme.of(context).copyWith(
+                    unselectedWidgetColor: Theme.of(
+                      context,
+                    ).primaryColor.withValues(alpha: 0.5),
+                  ),
+                  child: Checkbox(
+                    value: isSelected,
+                    onChanged: null, // 由onTap统一处理
+                    activeColor: colorScheme.primary,
+                    checkColor: Theme.of(context).colorScheme.onPrimary,
+                  ),
+                ),
+              ] else ...[
+                if (widget.song.duration != null &&
+                    (!isCompactMobile || !widget.reorderable))
+                  Text(
+                    '${widget.song.duration!.inMinutes}:${(widget.song.duration!.inSeconds % 60).toString().padLeft(2, '0')}',
+                  ),
+                if (widget.enableContextMenu &&
+                    MediaQuery.sizeOf(context).width < 600)
+                  Builder(
+                    builder: (menuContext) => IconButton(
+                      tooltip: '歌曲操作',
+                      icon: const Icon(Icons.more_vert),
+                      onPressed: () {
+                        final box = menuContext.findRenderObject();
+                        if (box is! RenderBox) return;
+                        final position = box.localToGlobal(
+                          Offset(box.size.width, box.size.height),
+                        );
+                        _showSongContextMenu(position, notifier);
+                      },
+                    ),
+                  ),
+                if (isCompactMobile && widget.reorderable)
+                  ReorderableDragStartListener(
+                    index: widget.index,
+                    child: const Padding(
+                      padding: EdgeInsets.all(12),
+                      child: Icon(Icons.drag_handle),
+                    ),
+                  ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+
     return Material(
       color: Colors.transparent,
       child: MouseRegion(
         onEnter: (_) => setState(() => _isHovered = true),
         onExit: (_) => setState(() => _isHovered = false),
-        child: ReorderableDragStartListener(
-          index: widget.index,
-          child: InkWell(
-            onTap: widget.onTap,
-            onSecondaryTapDown: (details) {
-              // 根据 enableContextMenu 参数决定是否显示右键菜单
-              if (widget.enableContextMenu) {
-                _showSongContextMenu(details.globalPosition, notifier);
-              }
-            },
-            borderRadius: BorderRadius.circular(8),
-
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              decoration: BoxDecoration(
-                color: _isHovered
-                    ? colorScheme.onSurface.withValues(alpha: 0.1)
-                    : isPlaying
-                    ? colorScheme.primary.withValues(alpha: 0.1)
-                    : Colors.transparent,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: ListTile(
-                leading: SizedBox(
-                  width: 50,
-                  height: 50,
-                  // isNotEmpty: 过滤空字节数组；errorBuilder: 兜底解码失败
-                  child:
-                      widget.song.albumArt != null &&
-                          widget.song.albumArt!.isNotEmpty
-                      ? ClipRRect(
-                          borderRadius: BorderRadius.circular(6),
-                          child: Image.memory(
-                            cacheWidth: 100,
-                            widget.song.albumArt!,
-                            fit: BoxFit.cover,
-                            gaplessPlayback: true,
-                            errorBuilder: (context, error, stackTrace) {
-                              return const Icon(
-                                Icons.music_note,
-                                size: 40,
-                                color: Colors.grey,
-                              );
-                            },
-                          ),
-                        )
-                      : const Icon(
-                          Icons.music_note,
-                          size: 40,
-                          color: Colors.grey,
-                        ),
-                ),
-                title: Text(
-                  widget.song.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                subtitle: Text(
-                  settings.showAlbumName
-                      ? '${widget.song.artist} - ${widget.song.album}'
-                      : widget.song.artist,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (isMultiSelectMode) ...[
-                      Theme(
-                        data: Theme.of(context).copyWith(
-                          unselectedWidgetColor: Theme.of(
-                            context,
-                          ).primaryColor.withValues(alpha: 0.5),
-                        ),
-                        child: Checkbox(
-                          value: isSelected,
-                          onChanged: null, // 由onTap统一处理
-                          activeColor: colorScheme.primary,
-                          checkColor: Theme.of(context).colorScheme.onPrimary,
-                        ),
-                      ),
-                    ] else ...[
-                      if (widget.song.duration != null)
-                        Text(
-                          '${widget.song.duration!.inMinutes}:${(widget.song.duration!.inSeconds % 60).toString().padLeft(2, '0')}',
-                        ),
-                    ],
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
+        // 桌面端仍可抓住整行排序；手机端只允许从独立把手开始拖动，
+        // 其余区域的纵向手势完整交给列表滚动。
+        child: widget.reorderable && !isCompactMobile
+            ? ReorderableDragStartListener(index: widget.index, child: tile)
+            : tile,
       ),
     );
   }

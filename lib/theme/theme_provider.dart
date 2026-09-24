@@ -6,7 +6,7 @@ import 'package:flutter/foundation.dart';
 class ThemeProvider with ChangeNotifier {
   static const TextStyle defaultStyle = TextStyle(fontWeight: FontWeight.w400);
 
-  static const TextTheme misansTextTheme = TextTheme(
+  static const TextTheme defaultTextTheme = TextTheme(
     displayLarge: defaultStyle,
     displayMedium: defaultStyle,
     displaySmall: defaultStyle,
@@ -41,7 +41,7 @@ class ThemeProvider with ChangeNotifier {
       'user_last_manual_seed_color'; // 用户手动选择的种子色，用于在关闭动态配色时恢复
 
   static const String _fontFamilyKey = 'user_font_family';
-  String _currentFontFamily = 'Misans'; // 默认字体
+  String _currentFontFamily = 'Roboto'; // Android 系统默认字体
 
   ThemeProvider() {
     initialize();
@@ -64,7 +64,7 @@ class ThemeProvider with ChangeNotifier {
       brightness: Brightness.light,
     ),
     fontFamily: _currentFontFamily,
-    textTheme: misansTextTheme,
+    textTheme: defaultTextTheme,
   ).makeMouseClickable();
 
   ThemeData get darkThemeData => ThemeData(
@@ -74,7 +74,7 @@ class ThemeProvider with ChangeNotifier {
       brightness: Brightness.dark,
     ),
     fontFamily: _currentFontFamily,
-    textTheme: misansTextTheme,
+    textTheme: defaultTextTheme,
   ).makeMouseClickable();
 
   Future<void> setSeedColor(Color newColor, {bool isManual = false}) async {
@@ -196,7 +196,7 @@ class ThemeProvider with ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     final savedFont = prefs.getString(_fontFamilyKey);
     if (savedFont != null && savedFont.isNotEmpty) {
-      _currentFontFamily = savedFont;
+      _currentFontFamily = savedFont == 'Misans' ? 'Roboto' : savedFont;
     }
   }
 
@@ -209,7 +209,7 @@ class ThemeProvider with ChangeNotifier {
   }
 
   void resetFontFamily() async {
-    _currentFontFamily = 'Misans'; // 默认字体
+    _currentFontFamily = 'Roboto'; // Android 系统默认字体
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_fontFamilyKey);
@@ -223,7 +223,7 @@ class ThemeProvider with ChangeNotifier {
   }
 
   Future<void> loadCurrentFont(SystemFonts systemFonts) async {
-    if (_currentFontFamily != 'Misans') {
+    if (_currentFontFamily != 'Roboto') {
       await systemFonts.loadFont(_currentFontFamily);
       notifyListeners();
     }

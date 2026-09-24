@@ -19,10 +19,7 @@ class ThemeSelectionScreen extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                '更改主题配色',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
+              Text('更改主题配色', style: Theme.of(context).textTheme.titleMedium),
               ElevatedButton.icon(
                 onPressed: () =>
                     _showModernColorPickerDialog(context, themeProvider),
@@ -50,7 +47,9 @@ class ThemeSelectionScreen extends StatelessWidget {
         return AlertDialog(
           title: const Text('自定义主题颜色'),
           content: SizedBox(
-            width: 320,
+            width: MediaQuery.sizeOf(context).width < 600
+                ? double.maxFinite
+                : 320,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [

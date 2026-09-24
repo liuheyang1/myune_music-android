@@ -308,11 +308,8 @@ class _PortraitPlaybarState extends State<PortraitPlaybar> {
     final Color accentColor = colorScheme.primary;
 
     final size = MediaQuery.of(context).size;
-    final double width = size.width > 0 ? size.width : 1150.0;
-    final double height = size.height > 0 ? size.height : 620.0;
-    final double scale = (math.sqrt(
-      (width * height) / (1150.0 * 620.0),
-    )).clamp(0.5, 2.0);
+    final double width = size.width > 0 ? size.width : 430.0;
+    final double scale = (width / 430.0).clamp(0.88, 1.15);
 
     // 顶级 Consumer，确保 Playbar 整体能响应 PlaylistContentNotifier 的变化
     return Consumer<PlaylistContentNotifier>(
